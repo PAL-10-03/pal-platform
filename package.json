@@ -1,0 +1,10 @@
+{
+  "name": "pal-platform",
+  "private": true,
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "tesseract.js": "^5.1.1"
+  }
+}

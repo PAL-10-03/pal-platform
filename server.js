@@ -393,8 +393,77 @@ function photoHash(filePath) {
   return pixels.map((value) => value > avg ? "1" : "0").join("");
 }
 
-function coreFrom(raw) {
-  return (String(raw || "").match(/\b\d{8}\b/) || [""])[0];
+function coreFrom(row) {
+  if (!row) return "";
+  if (row.partNumber) return String(row.partNumber);
+  return (String(row.raw || "").match(/\b\d{6,8}\b/) || [""])[0];
+}
+
+async function readPhotoNumbers(filePath) {
+  const found = new Set();
+  try {
+    const text = require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" });
+    (text.match(/\d{5,}/g) || []).forEach((token) => found.add(token));
+  } catch (error) {
+    try {
+      const { createWorker } = require("tesseract.js");
+      const worker = await createWorker("eng");
+      const result = await worker.recognize(filePath);
+      await worker.terminate();
+      (String(result.data.text || "").match(/\d{5,}/g) || []).forEach((token) => found.add(token));
+    } catch (inner) {
+      // This photo had no readable number.
+    }
+  }
+  return [...found];
+}
+
+async function matchPhotos(filePaths) {
+  const { numbers } = reference();
+  const numberHits = [];
+  for (const filePath of filePaths) {
+    const tokens = await readPhotoNumbers(filePath);
+    tokens.forEach((token) => {
+      if (numbers.has(token)) numberHits.push(numbers.get(token));
+    });
+  }
+  const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
+  const numberMatch = numberHits[0] || null;
+  if (numberMatch) {
+    const square = squares.find((row) => row.partNumber === numberMatch.partNumber) || null;
+    return {
+      partNumber: numberMatch.partNumber,
+      coreNumber: numberMatch.partNumber,
+      file: square ? square.file : null,
+      source: "label read, then Born Again Air list"
+    };
+  }
+  let best = null;
+  let second = null;
+  for (const filePath of filePaths) {
+    let hash = "";
+    try { hash = photoHash(filePath); } catch (error) { continue; }
+    squares.forEach((row) => {
+      if (!row.hash || !row.partNumber) return;
+      const distance = hamming(hash, row.hash);
+      if (!best || distance < best.distance) {
+        second = best;
+        best = { distance, row };
+      } else if (!second || distance < second.distance) {
+        second = { distance, row };
+      }
+    });
+  }
+  if (!best || best.distance > 42 || (second && second.distance - best.distance < 8)) {
+    return { partNumber: null, coreNumber: "", file: null, source: "no match in the loaded databases" };
+  }
+  const known = numbers.get(best.row.partNumber);
+  return {
+    partNumber: best.row.partNumber,
+    coreNumber: known ? known.partNumber : (best.row.coreNumber || ""),
+    file: best.row.file || null,
+    source: "picture match, then Born Again Air list"
+  };
 }
 
 function hamming(left, right) {
@@ -402,52 +471,6 @@ function hamming(left, right) {
   const length = Math.min(left.length, right.length);
   for (let i = 0; i < length; i += 1) if (left[i] !== right[i]) score += 1;
   return score;
-}
-
-function matchPhotos(filePaths) {
-  const { numbers } = reference();
-  const numberHits = [];
-  filePaths.forEach((filePath) => {
-    try {
-      const text = require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" });
-      (text.match(/\d{5,}/g) || []).forEach((token) => {
-        if (numbers.has(token)) numberHits.push(numbers.get(token));
-      });
-    } catch (error) {
-      // Number match is skipped when the photo has no readable database number.
-    }
-  });
-  const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
-  const numberMatch = numberHits[0] || null;
-  if (numberMatch) {
-    const square = squares.find((row) => row.partNumber === numberMatch.partNumber) || null;
-    return {
-      partNumber: numberMatch.partNumber,
-      coreNumber: square && square.coreNumber ? square.coreNumber : coreFrom(numberMatch.raw),
-      file: square ? square.file : null,
-      source: "number match in the loaded databases"
-    };
-  }
-  let best = null;
-  filePaths.forEach((filePath) => {
-    let hash = "";
-    try { hash = photoHash(filePath); } catch (error) { return; }
-    squares.forEach((row) => {
-      if (!row.hash || !row.partNumber) return;
-      const distance = hamming(hash, row.hash);
-      if (!best || distance < best.distance) best = { distance, row };
-    });
-  });
-  if (!best || best.distance > 70) {
-    return { partNumber: null, coreNumber: "", file: null, source: "no match in the loaded databases" };
-  }
-  const known = numbers.get(best.row.partNumber);
-  return {
-    partNumber: best.row.partNumber,
-    coreNumber: best.row.coreNumber || (known ? coreFrom(known.raw) : ""),
-    file: best.row.file || null,
-    source: "picture match in the loaded databases"
-  };
 }
 
 function activePriceSheet(tenantId) {
@@ -834,7 +857,7 @@ const server = http.createServer(async (req, res) => {
       return filePath;
     });
     let match = null;
-    try { match = matchPhotos(filePaths); } catch (error) { match = null; }
+    try { match = await matchPhotos(filePaths); } catch (error) { match = null; }
     filePaths.forEach((filePath) => fs.unlinkSync(filePath));
     send(res, 200, JSON.stringify(match || { partNumber: null }), { "content-type": "application/json" });
     return;
@@ -1067,7 +1090,7 @@ const server = http.createServer(async (req, res) => {
       return filePath;
     });
     let match = null;
-    try { match = matchPhotos(filePaths); } catch (error) { match = null; }
+    try { match = await matchPhotos(filePaths); } catch (error) { match = null; }
     filePaths.forEach((filePath) => fs.unlinkSync(filePath));
     send(res, 200, JSON.stringify(match || { partNumber: null, page: null, source: null, visual: [] }), { "content-type": "application/json" });
     return;
