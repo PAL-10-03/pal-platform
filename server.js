@@ -359,9 +359,9 @@ function loadReference() {
   const numbers = new Map();
   born.forEach((row) => {
     const reman = String(row.reman || "").trim();
-    if (reman) numbers.set(reman, { partNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || null });
+    if (reman) numbers.set(reman, { partNumber: reman, coreNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || null });
     String(row.raw || "").split(/\s+/).forEach((token) => {
-      if (/^\d{5,}$/.test(token) && !numbers.has(token)) numbers.set(token, { partNumber: reman || token, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || pages[token] || null });
+      if (/^\d{4,}$/.test(token) && !numbers.has(token)) numbers.set(token, { partNumber: token, coreNumber: reman || token, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[token] || pages[reman] || null });
     });
   });
   Object.keys(pages).forEach((part) => {
@@ -399,18 +399,31 @@ function coreFrom(row) {
   return (String(row.raw || "").match(/\b\d{6,8}\b/) || [""])[0];
 }
 
+function lookupNumber(numbers, token) {
+  if (numbers.has(token)) return { row: numbers.get(token), score: token.length + 100 };
+  let best = null;
+  for (const [key, row] of numbers) {
+    if (key.length < 5 || token.length < 5) continue;
+    if (key.startsWith(token) || token.startsWith(key)) {
+      const score = Math.min(key.length, token.length);
+      if (!best || score > best.score) best = { row, score };
+    }
+  }
+  return best;
+}
+
 async function readPhotoNumbers(filePath) {
   const found = new Set();
+  const add = (text) => (String(text || "").match(/\d{4,}/g) || []).forEach((token) => found.add(token));
   try {
-    const text = require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" });
-    (text.match(/\d{5,}/g) || []).forEach((token) => found.add(token));
+    add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" }));
+    add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "11"], { encoding: "utf8" }));
   } catch (error) {
     try {
       const { createWorker } = require("tesseract.js");
       const worker = await createWorker("eng");
-      const result = await worker.recognize(filePath);
+      add((await worker.recognize(filePath)).data.text);
       await worker.terminate();
-      (String(result.data.text || "").match(/\d{5,}/g) || []).forEach((token) => found.add(token));
     } catch (inner) {
       // This photo had no readable number.
     }
@@ -420,22 +433,24 @@ async function readPhotoNumbers(filePath) {
 
 async function matchPhotos(filePaths) {
   const { numbers } = reference();
-  const numberHits = [];
+  const hits = [];
   for (const filePath of filePaths) {
     const tokens = await readPhotoNumbers(filePath);
     tokens.forEach((token) => {
-      if (numbers.has(token)) numberHits.push(numbers.get(token));
+      const hit = lookupNumber(numbers, token);
+      if (hit) hits.push({ ...hit, token });
     });
   }
+  hits.sort((left, right) => right.score - left.score);
   const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
-  const numberMatch = numberHits[0] || null;
+  const numberMatch = hits[0] || null;
   if (numberMatch) {
-    const square = squares.find((row) => row.partNumber === numberMatch.partNumber) || null;
+    const square = squares.find((row) => row.partNumber === numberMatch.row.partNumber) || null;
     return {
-      partNumber: numberMatch.partNumber,
-      coreNumber: numberMatch.partNumber,
+      partNumber: numberMatch.token && numberMatch.token !== numberMatch.row.coreNumber ? numberMatch.token : numberMatch.row.partNumber,
+      coreNumber: numberMatch.row.coreNumber || numberMatch.row.partNumber,
       file: square ? square.file : null,
-      source: "label read, then Born Again Air list"
+      source: "numbers read: " + hits.slice(0, 4).map((hit) => hit.token).join(", ")
     };
   }
   let best = null;
@@ -460,7 +475,7 @@ async function matchPhotos(filePaths) {
   const known = numbers.get(best.row.partNumber);
   return {
     partNumber: best.row.partNumber,
-    coreNumber: known ? known.partNumber : (best.row.coreNumber || ""),
+    coreNumber: known ? (known.coreNumber || known.partNumber) : (best.row.coreNumber || ""),
     file: best.row.file || null,
     source: "picture match, then Born Again Air list"
   };
@@ -807,7 +822,7 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req);
     const partNumber = String(body.get("partNumber") || "").trim();
     const known = reference().numbers.get(partNumber);
-    send(res, 200, JSON.stringify({ partNumber, coreNumber: known ? coreFrom(known.raw) : "" }), { "content-type": "application/json" });
+    send(res, 200, JSON.stringify({ partNumber, coreNumber: known ? (known.coreNumber || "") : "" }), { "content-type": "application/json" });
     return;
   }
 
@@ -1017,7 +1032,7 @@ const server = http.createServer(async (req, res) => {
       const existing = db.scans.find((scan) => scan.workloadId === workload.id && scan.confirmedPartNumber === partNumber);
       db.scans.push({
         id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
-        confirmedPartNumber: partNumber, coreNumber: existing ? existing.coreNumber : (known ? coreFrom(known.raw) : ""),
+        confirmedPartNumber: partNumber, coreNumber: existing ? existing.coreNumber : (known ? (known.coreNumber || "") : ""),
         photoCount: 0, photosDeleted: true, inDatabase: Boolean(known),
         wasCorrected: true, confirmedBy: session.userId, confirmedAt: new Date().toISOString()
       });
@@ -1113,7 +1128,7 @@ const server = http.createServer(async (req, res) => {
     const known = reference().numbers.get(partNumber);
     db.scans.push({
       id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
-      confirmedPartNumber: partNumber, coreNumber: known ? coreFrom(known.raw) : "",
+      confirmedPartNumber: partNumber, coreNumber: known ? (known.coreNumber || "") : "",
       photoCount: 3, photosDeleted: true, inDatabase: Boolean(known),
       wasCorrected: true, confirmedBy: session.userId, confirmedAt: new Date().toISOString()
     });
