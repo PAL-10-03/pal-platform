@@ -257,9 +257,14 @@ function workloadPage(session, db, workload) {
           const change = '<form method="post" action="/workloads/${workload.id}/confirm"><label>Change part #<input name="partNumber" required></label><button type="submit">Change part #</button></form>';
           const confirm = '<form method="post" action="/workloads/${workload.id}/confirm"><input type="hidden" name="partNumber" value="' + (result.partNumber || "") + '"><button type="submit">Confirm</button></form>';
           const image = result.file ? '<img src="/reference/square/' + result.file + '" alt="Database square">' : "";
+          const choices = (result.choices || []).map((choice) => {
+            const image = choice.file ? '<img src="/reference/square/' + choice.file + '" alt="Database square">' : "";
+            return '<div class="card"><p>Part number: <strong>' + choice.partNumber + '</strong></p><p>Core number: <strong>' + (choice.coreNumber || "Not in Born Again Air Database") + '</strong></p>' + image +
+              '<form method="post" action="/workloads/${workload.id}/confirm"><input type="hidden" name="partNumber" value="' + choice.partNumber + '"><button type="submit">Use this square</button></form></div>';
+          }).join("");
           match.innerHTML = result.partNumber
             ? "<p>Part number: <strong>" + result.partNumber + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "Not in Born Again Air Database") + "</strong></p>" + image + confirm + change
-            : "<p>No match in the loaded databases.</p>" + change;
+            : "<p>No exact match. Pick the closest catalog square.</p>" + choices + change;
           status.textContent = "Photos deleted. The result is above.";
         } catch (error) {
           status.textContent = "The check did not finish. Try the photos again.";
@@ -431,9 +436,45 @@ async function readPhotoNumbers(filePath) {
   return [...found];
 }
 
+async function askPictureCheck(filePaths, extra) {
+  const key = process.env.XAI_API_KEY;
+  if (!key) return "";
+  const images = filePaths.slice(0, 3).map((filePath) => {
+    const data = fs.readFileSync(filePath).toString("base64");
+    return { type: "image_url", image_url: { url: "data:image/jpeg;base64," + data } };
+  });
+  const response = await fetch("https://api.x.ai/v1/chat/completions", {
+    method: "POST",
+    headers: { authorization: "Bearer " + key, "content-type": "application/json" },
+    body: JSON.stringify({
+      model: "grok-4",
+      temperature: 0,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "Read only numbers printed on the compressor label or stamp. Reply with the digits you can see, separated by spaces. If no number is readable, reply NONE. Do not guess. Do not use memory. " + (extra || "") },
+          ...images
+        ]
+      }]
+    })
+  });
+  if (!response.ok) return "";
+  const payload = await response.json();
+  return String(payload.choices && payload.choices[0] && payload.choices[0].message && payload.choices[0].message.content || "");
+}
+
 async function matchPhotos(filePaths) {
   const { numbers } = reference();
   const hits = [];
+  try {
+    const read = await askPictureCheck(filePaths);
+    String(read).match(/\d{4,}/g)?.forEach((token) => {
+      const hit = lookupNumber(numbers, token);
+      if (hit) hits.push({ ...hit, token });
+    });
+  } catch (error) {
+    // The key check can fail. The local number read still runs.
+  }
   for (const filePath of filePaths) {
     const tokens = await readPhotoNumbers(filePath);
     tokens.forEach((token) => {
@@ -453,32 +494,31 @@ async function matchPhotos(filePaths) {
       source: "numbers read: " + hits.slice(0, 4).map((hit) => hit.token).join(", ")
     };
   }
-  let best = null;
-  let second = null;
+  const ranked = [];
   for (const filePath of filePaths) {
     let hash = "";
     try { hash = photoHash(filePath); } catch (error) { continue; }
     squares.forEach((row) => {
       if (!row.hash || !row.partNumber) return;
       const distance = hamming(hash, row.hash);
-      if (!best || distance < best.distance) {
-        second = best;
-        best = { distance, row };
-      } else if (!second || distance < second.distance) {
-        second = { distance, row };
-      }
+      ranked.push({ distance, row });
     });
   }
-  if (!best || best.distance > 42 || (second && second.distance - best.distance < 8)) {
-    return { partNumber: null, coreNumber: "", file: null, source: "no match in the loaded databases" };
+  ranked.sort((left, right) => left.distance - right.distance);
+  const seen = new Set();
+  const choices = [];
+  for (const item of ranked) {
+    if (seen.has(item.row.partNumber)) continue;
+    seen.add(item.row.partNumber);
+    const known = numbers.get(item.row.partNumber);
+    choices.push({
+      partNumber: item.row.partNumber,
+      coreNumber: known ? (known.coreNumber || known.partNumber) : (item.row.coreNumber || ""),
+      file: item.row.file || null
+    });
+    if (choices.length === 4) break;
   }
-  const known = numbers.get(best.row.partNumber);
-  return {
-    partNumber: best.row.partNumber,
-    coreNumber: known ? (known.coreNumber || known.partNumber) : (best.row.coreNumber || ""),
-    file: best.row.file || null,
-    source: "picture match, then Born Again Air list"
-  };
+  return { partNumber: null, coreNumber: "", file: null, choices, source: "closest catalog squares" };
 }
 
 function hamming(left, right) {
