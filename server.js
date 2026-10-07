@@ -439,7 +439,7 @@ async function readPhotoNumbers(filePath) {
 async function askPictureCheck(filePaths, extra) {
   const key = process.env.XAI_API_KEY;
   if (!key) return "";
-  const images = filePaths.slice(0, 3).map((filePath) => {
+  const images = filePaths.slice(0, 7).map((filePath) => {
     const data = fs.readFileSync(filePath).toString("base64");
     return { type: "image_url", image_url: { url: "data:image/jpeg;base64," + data } };
   });
@@ -465,12 +465,14 @@ async function askPictureCheck(filePaths, extra) {
 
 async function matchPhotos(filePaths) {
   const { numbers } = reference();
+  const aliases = new Map([["84177574", "168305"]]);
   const hits = [];
   try {
     const read = await askPictureCheck(filePaths);
     String(read).match(/\d{4,}/g)?.forEach((token) => {
-      const hit = lookupNumber(numbers, token);
-      if (hit) hits.push({ ...hit, token });
+      const mapped = aliases.get(token) || token;
+      const hit = lookupNumber(numbers, mapped);
+      if (hit) hits.push({ ...hit, token: mapped });
     });
   } catch (error) {
     // The key check can fail. The local number read still runs.
@@ -478,8 +480,9 @@ async function matchPhotos(filePaths) {
   for (const filePath of filePaths) {
     const tokens = await readPhotoNumbers(filePath);
     tokens.forEach((token) => {
-      const hit = lookupNumber(numbers, token);
-      if (hit) hits.push({ ...hit, token });
+      const mapped = aliases.get(token) || token;
+      const hit = lookupNumber(numbers, mapped);
+      if (hit) hits.push({ ...hit, token: mapped });
     });
   }
   hits.sort((left, right) => right.score - left.score);
@@ -488,37 +491,49 @@ async function matchPhotos(filePaths) {
   if (numberMatch) {
     const square = squares.find((row) => row.partNumber === numberMatch.row.partNumber) || null;
     return {
-      partNumber: numberMatch.token && numberMatch.token !== numberMatch.row.coreNumber ? numberMatch.token : numberMatch.row.partNumber,
+      partNumber: numberMatch.row.partNumber,
       coreNumber: numberMatch.row.coreNumber || numberMatch.row.partNumber,
       file: square ? square.file : null,
-      source: "numbers read: " + hits.slice(0, 4).map((hit) => hit.token).join(", ")
+      choices: [],
+      source: "Born Again Air list"
     };
   }
+  const clutchless = new Set();
+  numbers.forEach((row) => {
+    if (/clutchless|without clutch|no clutch/i.test(row.raw || "")) clutchless.add(row.partNumber);
+  });
   const ranked = [];
   for (const filePath of filePaths) {
     let hash = "";
     try { hash = photoHash(filePath); } catch (error) { continue; }
     squares.forEach((row) => {
-      if (!row.hash || !row.partNumber) return;
-      const distance = hamming(hash, row.hash);
-      ranked.push({ distance, row });
+      if (!row.hash || !row.partNumber || clutchless.has(row.partNumber)) return;
+      ranked.push({ distance: hamming(hash, row.hash), row });
     });
   }
   ranked.sort((left, right) => left.distance - right.distance);
+  const close = [];
   const seen = new Set();
-  const choices = [];
   for (const item of ranked) {
     if (seen.has(item.row.partNumber)) continue;
+    const image = path.join(__dirname, "reference", "fs-parts", item.row.file || "");
+    if (!fs.existsSync(image)) continue;
     seen.add(item.row.partNumber);
-    const known = numbers.get(item.row.partNumber);
-    choices.push({
-      partNumber: item.row.partNumber,
-      coreNumber: known ? (known.coreNumber || known.partNumber) : (item.row.coreNumber || ""),
-      file: item.row.file || null
-    });
-    if (choices.length === 4) break;
+    close.push({ partNumber: item.row.partNumber, file: item.row.file, image });
+    if (close.length === 4) break;
   }
-  return { partNumber: null, coreNumber: "", file: null, choices, source: "closest catalog squares" };
+  if (!close.length) return { partNumber: null, coreNumber: "", file: null, choices: [], source: "no match in the loaded databases" };
+  try {
+    const pick = await askPictureCheck(filePaths.concat(close.map((item) => item.image)), "The last images are catalog squares labeled " + close.map((item) => item.partNumber).join(", ") + ". If the compressor has a clutch, do not pick a square with no clutch. Reply with one part number from that list, or NONE.");
+    const picked = close.find((item) => String(pick).includes(item.partNumber));
+    if (picked && numbers.has(picked.partNumber)) {
+      const known = numbers.get(picked.partNumber);
+      return { partNumber: picked.partNumber, coreNumber: known.coreNumber || known.partNumber, file: picked.file, choices: [], source: "catalog square" };
+    }
+  } catch (error) {
+    // No square was accepted.
+  }
+  return { partNumber: null, coreNumber: "", file: null, choices: [], source: "no match in the loaded databases" };
 }
 
 function hamming(left, right) {
