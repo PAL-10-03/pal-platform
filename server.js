@@ -417,17 +417,36 @@ function matchPhotos(filePaths) {
       // Number match is skipped when the photo has no readable database number.
     }
   });
+  const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
   const numberMatch = numberHits[0] || null;
-  if (!numberMatch) {
+  if (numberMatch) {
+    const square = squares.find((row) => row.partNumber === numberMatch.partNumber) || null;
+    return {
+      partNumber: numberMatch.partNumber,
+      coreNumber: square && square.coreNumber ? square.coreNumber : coreFrom(numberMatch.raw),
+      file: square ? square.file : null,
+      source: "number match in the loaded databases"
+    };
+  }
+  let best = null;
+  filePaths.forEach((filePath) => {
+    let hash = "";
+    try { hash = photoHash(filePath); } catch (error) { return; }
+    squares.forEach((row) => {
+      if (!row.hash || !row.partNumber) return;
+      const distance = hamming(hash, row.hash);
+      if (!best || distance < best.distance) best = { distance, row };
+    });
+  });
+  if (!best || best.distance > 70) {
     return { partNumber: null, coreNumber: "", file: null, source: "no match in the loaded databases" };
   }
-  const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
-  const square = squares.find((row) => row.partNumber === numberMatch.partNumber) || null;
+  const known = numbers.get(best.row.partNumber);
   return {
-    partNumber: numberMatch.partNumber,
-    coreNumber: square && square.coreNumber ? square.coreNumber : coreFrom(numberMatch.raw),
-    file: square ? square.file : null,
-    source: "number match in the loaded databases"
+    partNumber: best.row.partNumber,
+    coreNumber: best.row.coreNumber || (known ? coreFrom(known.raw) : ""),
+    file: best.row.file || null,
+    source: "picture match in the loaded databases"
   };
 }
 
