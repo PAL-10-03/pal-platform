@@ -406,20 +406,12 @@ function coreFrom(row) {
 
 function lookupNumber(numbers, token) {
   if (numbers.has(token)) return { row: numbers.get(token), score: token.length + 100 };
-  let best = null;
-  for (const [key, row] of numbers) {
-    if (key.length < 5 || token.length < 5) continue;
-    if (key.startsWith(token) || token.startsWith(key)) {
-      const score = Math.min(key.length, token.length);
-      if (!best || score > best.score) best = { row, score };
-    }
-  }
-  return best;
+  return null;
 }
 
 async function readPhotoNumbers(filePath) {
   const found = new Set();
-  const add = (text) => (String(text || "").match(/\d{4,}/g) || []).forEach((token) => found.add(token));
+  const add = (text) => (String(text || "").match(/\d{7,}/g) || []).forEach((token) => found.add(token));
   try {
     add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" }));
     add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "11"], { encoding: "utf8" }));
@@ -469,7 +461,7 @@ async function matchPhotos(filePaths) {
   const hits = [];
   try {
     const read = await askPictureCheck(filePaths);
-    String(read).match(/\d{4,}/g)?.forEach((token) => {
+    String(read).match(/\d{7,}/g)?.forEach((token) => {
       const mapped = aliases.get(token) || token;
       const hit = lookupNumber(numbers, mapped);
       if (hit) hits.push({ ...hit, token: mapped });
@@ -497,41 +489,6 @@ async function matchPhotos(filePaths) {
       choices: [],
       source: "Born Again Air list"
     };
-  }
-  const clutchless = new Set();
-  numbers.forEach((row) => {
-    if (/clutchless|without clutch|no clutch/i.test(row.raw || "")) clutchless.add(row.partNumber);
-  });
-  const ranked = [];
-  for (const filePath of filePaths) {
-    let hash = "";
-    try { hash = photoHash(filePath); } catch (error) { continue; }
-    squares.forEach((row) => {
-      if (!row.hash || !row.partNumber || clutchless.has(row.partNumber)) return;
-      ranked.push({ distance: hamming(hash, row.hash), row });
-    });
-  }
-  ranked.sort((left, right) => left.distance - right.distance);
-  const close = [];
-  const seen = new Set();
-  for (const item of ranked) {
-    if (seen.has(item.row.partNumber)) continue;
-    const image = path.join(__dirname, "reference", "fs-parts", item.row.file || "");
-    if (!fs.existsSync(image)) continue;
-    seen.add(item.row.partNumber);
-    close.push({ partNumber: item.row.partNumber, file: item.row.file, image });
-    if (close.length === 4) break;
-  }
-  if (!close.length) return { partNumber: null, coreNumber: "", file: null, choices: [], source: "no match in the loaded databases" };
-  try {
-    const pick = await askPictureCheck(filePaths.concat(close.map((item) => item.image)), "The last images are catalog squares labeled " + close.map((item) => item.partNumber).join(", ") + ". If the compressor has a clutch, do not pick a square with no clutch. Reply with one part number from that list, or NONE.");
-    const picked = close.find((item) => String(pick).includes(item.partNumber));
-    if (picked && numbers.has(picked.partNumber)) {
-      const known = numbers.get(picked.partNumber);
-      return { partNumber: picked.partNumber, coreNumber: known.coreNumber || known.partNumber, file: picked.file, choices: [], source: "catalog square" };
-    }
-  } catch (error) {
-    // No square was accepted.
   }
   return { partNumber: null, coreNumber: "", file: null, choices: [], source: "no match in the loaded databases" };
 }
