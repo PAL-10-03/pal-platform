@@ -264,7 +264,7 @@ function workloadPage(session, db, workload) {
           }).join("");
           match.innerHTML = result.partNumber
             ? "<p>Part number: <strong>" + result.partNumber + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "Not in Born Again Air Database") + "</strong></p>" + image + confirm + change
-            : "<p>No exact match. Pick the closest catalog square.</p>" + choices + change;
+            : "<p>No match. Numbers read: " + ((result.read || []).join(", ") || "none") + "</p>" + change;
           status.textContent = "Photos deleted. The result is above.";
         } catch (error) {
           status.textContent = "The check did not finish. Try the photos again.";
@@ -458,24 +458,24 @@ async function askPictureCheck(filePaths, extra) {
 async function matchPhotos(filePaths) {
   const { numbers } = reference();
   const aliases = new Map([["84177574", "168305"]]);
+  const seen = [];
   const hits = [];
+  const take = (token) => {
+    if (!/^\d{7,}$/.test(token)) return;
+    seen.push(token);
+    const mapped = aliases.get(token) || token;
+    const hit = lookupNumber(numbers, mapped);
+    if (hit) hits.push({ ...hit, token: mapped, read: token });
+  };
   try {
     const read = await askPictureCheck(filePaths);
-    String(read).match(/\d{7,}/g)?.forEach((token) => {
-      const mapped = aliases.get(token) || token;
-      const hit = lookupNumber(numbers, mapped);
-      if (hit) hits.push({ ...hit, token: mapped });
-    });
+    String(read).match(/\d{7,}/g)?.forEach(take);
   } catch (error) {
     // The key check can fail. The local number read still runs.
   }
   for (const filePath of filePaths) {
     const tokens = await readPhotoNumbers(filePath);
-    tokens.forEach((token) => {
-      const mapped = aliases.get(token) || token;
-      const hit = lookupNumber(numbers, mapped);
-      if (hit) hits.push({ ...hit, token: mapped });
-    });
+    tokens.forEach(take);
   }
   hits.sort((left, right) => right.score - left.score);
   const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
@@ -487,10 +487,11 @@ async function matchPhotos(filePaths) {
       coreNumber: numberMatch.row.coreNumber || numberMatch.row.partNumber,
       file: square ? square.file : null,
       choices: [],
+      read: seen,
       source: "Born Again Air list"
     };
   }
-  return { partNumber: null, coreNumber: "", file: null, choices: [], source: "no match in the loaded databases" };
+  return { partNumber: null, coreNumber: "", file: null, choices: [], read: seen, source: "no match in the loaded databases" };
 }
 
 function hamming(left, right) {
