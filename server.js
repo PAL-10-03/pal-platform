@@ -282,25 +282,29 @@ function excelReport(workload, lines) {
   const rows = [
     ["Part #", "Core #", "QTY", "Price", "Total"],
     ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty || 0), "$" + Number(line.price || 0), "$" + Number(line.total || 0)]),
-    ["", "Total units", units, "Order total", "$" + boxTotal]
+    ["", "Total units", units, "Price total", "$" + boxTotal]
   ];
+  const styles = `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf/><xf applyAlignment="1"><alignment horizontal="center"/></xf></cellXfs></styleSheet>`;
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
     const r = index + 1;
     const cols = row.map((value, col) => {
       const ref = String.fromCharCode(65 + col) + r;
       if (value == null || value === "") return "";
-      if (typeof value === "number") return `<c r="${ref}"><v>${value}</v></c>`;
-      return `<c r="${ref}" t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
+      const center = col >= 2 || (typeof value === "number") || String(value).startsWith("$");
+      const style = center ? ' s="1"' : "";
+      if (typeof value === "number") return `<c r="${ref}"${style}><v>${value}</v></c>`;
+      return `<c r="${ref}"${style} t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
     }).join("");
     sheet.push(`<row r="${r}">${cols}</row>`);
   });
   sheet.push(`</sheetData></worksheet>`);
   const files = {
-    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
     "_rels/.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
     "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Box report" sheetId="1" r:id="rId1"/></sheets></workbook>`,
-    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
+    "xl/styles.xml": styles,
     "xl/worksheets/sheet1.xml": sheet.join("")
   };
   const crcTable = new Uint32Array(256);
@@ -1256,7 +1260,7 @@ const server = http.createServer(async (req, res) => {
       <p class="sub">The active file is the one the label check uses.</p>
       <div class="card" style="margin-top:18px">
         <p>Active file</p>
-        <p><a class="button" href="/core-list/file">${fileName.replace("core-database", "Born Again Air Database")}</a></p>
+        <p><a class="button" href="/core-list/file">Born Again Air Database.xlsx</a></p>
         <p class="meta">Click the file to open it. Edit it, then update it here.</p>
         <form id="list-form">
           <label>Updated file<input id="list-file" type="file" accept=".pdf,.xlsx,.csv,.json"></label>
@@ -1291,14 +1295,47 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const dir = path.join(dataDir, "files", session.tenantId);
-    const active = fs.existsSync(dir) ? fs.readdirSync(dir).find((name) => name.startsWith("core-database.")) : null;
-    const file = active ? path.join(dir, active) : path.join(__dirname, "reference", "Born Again Air Database.pdf");
-    const fallback = path.join("/workspace/attachments/Born Again Air Database.pdf");
-    const source = fs.existsSync(file) ? file : (fs.existsSync(fallback) ? fallback : path.join(__dirname, "reference", "born-again-air.json"));
-    const name = path.basename(source);
-    const type = name.endsWith(".pdf") ? "application/pdf" : name.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/octet-stream";
-    res.writeHead(200, { "content-type": type, "content-disposition": `inline; filename="${name}"` });
-    res.end(fs.readFileSync(source));
+    const uploaded = fs.existsSync(dir) ? fs.readdirSync(dir).find((name) => name === "core-database.xlsx") : null;
+    if (uploaded) {
+      res.writeHead(200, { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'inline; filename="Born Again Air Database.xlsx"' });
+      res.end(fs.readFileSync(path.join(dir, uploaded)));
+      return;
+    }
+    const jsonFile = path.join(dir, "born-again-air.json");
+    const rows = JSON.parse(fs.readFileSync(fs.existsSync(jsonFile) ? jsonFile : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
+    const sheetRows = [["Core", "Row"], ...rows.map((row) => [row.reman || "", row.raw || ""])];
+    const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
+    const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
+    sheetRows.forEach((row, index) => {
+      const r = index + 1;
+      const cols = row.map((value, col) => {
+        const ref = String.fromCharCode(65 + col) + r;
+        return `<c r="${ref}" t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
+      }).join("");
+      sheet.push(`<row r="${r}">${cols}</row>`);
+    });
+    sheet.push(`</sheetData></worksheet>`);
+    const files = {
+      "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
+      "_rels/.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
+      "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Core database" sheetId="1" r:id="rId1"/></sheets></workbook>`,
+      "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
+      "xl/worksheets/sheet1.xml": sheet.join("")
+    };
+    const crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crcTable[n] = c; }
+    const crc32 = (buf) => { let c = 0xffffffff; for (const byte of buf) c = crcTable[(c ^ byte) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+    const parts = []; const central = []; let offset = 0;
+    Object.entries(files).forEach(([name, text]) => {
+      const fileName = Buffer.from(name); const data = Buffer.from(text); const crc = crc32(data);
+      const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(fileName.length, 26);
+      parts.push(local, fileName, data);
+      const head = Buffer.alloc(46); head.writeUInt32LE(0x02014b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(20, 6); head.writeUInt32LE(crc, 16); head.writeUInt32LE(data.length, 20); head.writeUInt32LE(data.length, 24); head.writeUInt16LE(fileName.length, 28); head.writeUInt32LE(offset, 42);
+      central.push(head, fileName); offset += local.length + fileName.length + data.length;
+    });
+    const centralBuf = Buffer.concat(central); const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(Object.keys(files).length, 8); end.writeUInt16LE(Object.keys(files).length, 10); end.writeUInt32LE(centralBuf.length, 12); end.writeUInt32LE(offset, 16);
+    res.writeHead(200, { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'inline; filename="Born Again Air Database.xlsx"' });
+    res.end(Buffer.concat([...parts, centralBuf, end]));
     return;
   }
 
