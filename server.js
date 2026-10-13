@@ -262,8 +262,8 @@ function workloadPage(session, db, workload) {
             return '<div class="card"><p>Part number: <strong>' + choice.partNumber + '</strong></p><p>Core number: <strong>' + (choice.coreNumber || "Not in Born Again Air Database") + '</strong></p>' + image +
               '<form method="post" action="/workloads/${workload.id}/confirm"><input type="hidden" name="partNumber" value="' + choice.partNumber + '"><button type="submit">Use this square</button></form></div>';
           }).join("");
-          match.innerHTML = result.partNumber
-            ? "<p>Part number: <strong>" + result.partNumber + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "Not in Born Again Air Database") + "</strong></p>" + image + confirm + change
+          match.innerHTML = result.partNumber || result.coreNumber
+            ? "<p>Part number: <strong>" + (result.partNumber || "") + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "") + "</strong></p>" + image + confirm + change
             : "<p>No match. Numbers read: " + ((result.read || []).join(", ") || "none") + "</p>" + change;
           status.textContent = "Photos deleted. The result is above.";
         } catch (error) {
@@ -363,19 +363,17 @@ function loadReference() {
   const dir = path.join(__dirname, "reference");
   const override = path.join(dataDir, "files", "tenant_born_again_air", "born-again-air.json");
   const born = JSON.parse(fs.readFileSync(fs.existsSync(override) ? override : path.join(dir, "born-again-air.json"), "utf8"));
-  const pages = JSON.parse(fs.readFileSync(path.join(dir, "four-season-pages.json"), "utf8"));
   const numbers = new Map();
   born.forEach((row) => {
     const reman = String(row.reman || "").trim();
-    if (reman) numbers.set(reman, { partNumber: reman, coreNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || null });
-    String(row.raw || "").split(/\s+/).forEach((token) => {
-      if (/^\d{4,}$/.test(token) && !numbers.has(token)) numbers.set(token, { partNumber: token, coreNumber: reman || token, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[token] || pages[reman] || null });
+    if (!reman) return;
+    const entry = { partNumber: reman, coreNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw };
+    const keys = [reman, ...String(row.raw || "").match(/\d{4,}/g) || []];
+    keys.filter(Boolean).forEach((key) => {
+      if (!numbers.has(key)) numbers.set(key, entry);
     });
   });
-  Object.keys(pages).forEach((part) => {
-    if (!numbers.has(part)) numbers.set(part, { partNumber: part, source: "4 Season Database.pdf", raw: "", page: pages[part] });
-  });
-  return { numbers, pages };
+  return { numbers, rows: born };
 }
 
 let referenceCache = null;
@@ -414,7 +412,7 @@ function lookupNumber(numbers, token) {
 
 async function readPhotoNumbers(filePath) {
   const found = new Set();
-  const add = (text) => (String(text || "").match(/\d{7,}/g) || []).forEach((token) => found.add(token));
+  const add = (text) => (String(text || "").match(/\d{4,}/g) || []).forEach((token) => found.add(token));
   try {
     add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" }));
     add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "11"], { encoding: "utf8" }));
@@ -459,20 +457,24 @@ async function askPictureCheck(filePaths, extra) {
 }
 
 async function matchPhotos(filePaths) {
-  const { numbers } = reference();
+  const { numbers, rows } = reference();
   const aliases = new Map([["84177574", "168305"]]);
   const seen = [];
   const hits = [];
   const take = (token) => {
-    if (!/^\d{7,}$/.test(token)) return;
+    if (!/^\d{4,}$/.test(token)) return;
     seen.push(token);
     const mapped = aliases.get(token) || token;
-    const hit = lookupNumber(numbers, mapped);
-    if (hit) hits.push({ ...hit, token: mapped, read: token });
+    let hit = lookupNumber(numbers, mapped);
+    if (!hit) {
+      const row = rows.find((item) => String(item.raw || "").includes(mapped) || String(item.reman || "") === mapped);
+      if (row) hit = { row: { partNumber: row.reman, coreNumber: row.reman, raw: row.raw }, score: mapped.length };
+    }
+    if (hit && hit.row.coreNumber) hits.push({ ...hit, token: mapped, read: token });
   };
   try {
     const read = await askPictureCheck(filePaths);
-    String(read).match(/\d{7,}/g)?.forEach(take);
+    String(read).match(/\d{4,}/g)?.forEach(take);
   } catch (error) {
     // The key check can fail. The local number read still runs.
   }
@@ -481,17 +483,16 @@ async function matchPhotos(filePaths) {
     tokens.forEach(take);
   }
   hits.sort((left, right) => right.score - left.score);
-  const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "square-hashes.json"), "utf8"));
   const numberMatch = hits[0] || null;
   if (numberMatch) {
-    const square = squares.find((row) => row.partNumber === numberMatch.row.partNumber) || null;
+    const reman = numberMatch.row.coreNumber || numberMatch.row.partNumber;
     return {
-      partNumber: numberMatch.row.partNumber,
-      coreNumber: numberMatch.row.coreNumber || numberMatch.row.partNumber,
-      file: square ? square.file : null,
+      partNumber: reman,
+      coreNumber: reman,
+      file: null,
       choices: [],
       read: seen,
-      source: "Born Again Air list"
+      source: "Born Again Air reman"
     };
   }
   return { partNumber: null, coreNumber: "", file: null, choices: [], read: seen, source: "no match in the loaded databases" };
@@ -822,8 +823,8 @@ const server = http.createServer(async (req, res) => {
           const response = await fetch("/check", { method: "POST", body });
           const result = await response.json();
           const image = result.file ? '<img src="/reference/square/' + result.file + '" alt="Database square">' : "";
-          document.getElementById("match").innerHTML = result.partNumber
-            ? "<p>Part number: <strong>" + result.partNumber + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "Not in Born Again Air Database") + "</strong></p>" + image
+          document.getElementById("match").innerHTML = result.partNumber || result.coreNumber
+            ? "<p>Part number: <strong>" + (result.partNumber || "") + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "") + "</strong></p>" + image
             : "<p>No match in the loaded databases. Nothing was saved.</p>";
           status.textContent = "Photos deleted. Nothing was saved.";
         });
