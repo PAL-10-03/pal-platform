@@ -1,4 +1,4 @@
-
+// PAL version 60 - manual part or core number only, no photos
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -175,8 +175,8 @@ function bornAgainOnly(session) {
 function qtyRows(db, workloadId) {
   const rows = {};
   db.scans.filter((scan) => scan.workloadId === workloadId).forEach((scan) => {
-    const key = scan.confirmedPartNumber;
-    if (!rows[key]) rows[key] = { partNumber: key, qty: 0 };
+    const key = scan.confirmedPartNumber || scan.coreNumber || scan.id;
+    if (!rows[key]) rows[key] = { partNumber: scan.confirmedPartNumber || "", coreNumber: scan.coreNumber || "", qty: 0 };
     rows[key].qty += 1;
   });
   return Object.values(rows);
@@ -185,127 +185,58 @@ function qtyRows(db, workloadId) {
 function workloadPage(session, db, workload) {
   const ref = bornAgainOnly(session) ? referenceData() : null;
   const rows = qtyRows(db, workload.id).map((row) => {
-    const hit = ref && ref.baa.find((item) => item.reman === row.partNumber || item.raw.includes(row.partNumber));
-    const image = ref && ref.fsPages[row.partNumber] ? `<a href="/reference/four-season/${row.partNumber}">Database image</a>` : "";
-    const note = hit ? "In Born Again Air Database" : "Not in the loaded database";
     const label = db.scans.filter((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber)
       .map((scan) => `<a href="/labels/${scan.id}">Print label</a>`).join("<br>");
-    return `<tr><td>${row.partNumber}</td><td>${row.qty}</td><td>${label}</td><td><form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="-1"><button type="submit">−</button></form> <form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="1"><button type="submit">+</button></form></td></tr>`;
+    return `<tr><td>${row.partNumber || ""}</td><td>${row.coreNumber || ""}</td><td>${row.qty}</td><td>${label}</td><td><form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="-1"><button type="submit">−</button></form> <form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="1"><button type="submit">+</button></form></td></tr>`;
   }).join("");
   return page(workload.name, `
     ${header(session)}<h1>${workload.name}</h1>
     ${workload.status === "complete" ? `<p><strong>Box complete.</strong> Quantities can still be edited.</p>` : ""}
     <p class="sub">${workload.status}</p>
     <div class="card" style="margin-top:18px">
-      <div id="match"></div>
       <form method="post" action="/workloads/${workload.id}/confirm">
-        <label>Change part #<input name="partNumber" placeholder="Type the part number"></label>
-        <button type="submit">Change part #</button>
+        <label>Core or part number<input name="partNumber" placeholder="Type a core or part number" required></label>
+        <button type="submit">Add</button>
       </form>
-      <form id="scan-form">
-        <div id="photos"></div>
-        <button type="button" id="take-photo">Take photo</button>
-        <button type="submit">Check databases</button>
-        <p class="meta">Tap Take photo for each picture. One, five, or more. They are deleted after the check.</p>
-        <p class="meta" id="scan-status"></p>
-      </form>
-      <div id="match"></div>
+      <p class="meta">Looks up the number in the database. If it is not there, the field is left blank.</p>
     </div>
     <div class="card" style="margin-top:12px">
-      <table><tr><th>Core / Part #</th><th>QTY</th><th>Label</th><th></th></tr>${rows || `<tr><td colspan="4">No cores yet.</td></tr>`}</table>
+      <table><tr><th>Part #</th><th>Core #</th><th>QTY</th><th>Label</th><th></th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
     </div>
     <p style="margin-top:18px">${workload.status === "complete" && session.role === "manager" ? `<a class="button" href="/workloads/${workload.id}/ticket">Make P.O. ticket</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a>` : workload.status === "complete" ? `<p>Box complete. Quantities can still be edited.</p>` : `<form method="post" action="/workloads/${workload.id}/finish"><button type="submit">Finish box</button></form>`} <a class="button ghost" href="/modules/workloads">Back to workloads</a></p>
-    <script>
-      async function fileToBase64(file) {
-        const image = await createImageBitmap(file);
-        const scale = Math.min(1, 800 / Math.max(image.width, image.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.7));
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        let binary = "";
-        for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-        return btoa(binary);
-      }
-      document.getElementById("take-photo").addEventListener("click", () => {
-        const input = document.createElement("input");
-        input.type = "file";
-        input.accept = "image/*";
-        input.capture = "environment";
-        input.addEventListener("change", () => {
-          if (!input.files[0]) return;
-          const label = document.createElement("label");
-          label.textContent = "Photo " + (document.querySelectorAll("#photos input").length + 1);
-          label.appendChild(input);
-          document.getElementById("photos").appendChild(label);
-        });
-        input.click();
-      });
-      document.getElementById("scan-form").addEventListener("submit", async (event) => {
-        event.preventDefault();
-        const status = document.getElementById("scan-status");
-        const match = document.getElementById("match");
-        const files = [...document.querySelectorAll("#photos input")].map((input) => input.files[0]).filter(Boolean);
-        if (!files.length) { status.textContent = "Add at least one photo."; return; }
-        status.textContent = "Checking the databases...";
-        try {
-          const body = new URLSearchParams();
-          for (const file of files) body.append("photo", await fileToBase64(file));
-          const response = await fetch("/workloads/${workload.id}/scans", { method: "POST", body });
-          const result = await response.json();
-          const change = '<form method="post" action="/workloads/${workload.id}/confirm"><label>Change part #<input name="partNumber" required></label><button type="submit">Change part #</button></form>';
-          const confirm = '<form method="post" action="/workloads/${workload.id}/confirm"><input type="hidden" name="partNumber" value="' + (result.partNumber || "") + '"><button type="submit">Confirm</button></form>';
-          const image = result.file ? '<img src="/reference/square/' + result.file + '" alt="Database square">' : "";
-          const choices = (result.choices || []).map((choice) => {
-            const image = choice.file ? '<img src="/reference/square/' + choice.file + '" alt="Database square">' : "";
-            return '<div class="card"><p>Part number: <strong>' + choice.partNumber + '</strong></p><p>Core number: <strong>' + (choice.coreNumber || "Not in Born Again Air Database") + '</strong></p>' + image +
-              '<form method="post" action="/workloads/${workload.id}/confirm"><input type="hidden" name="partNumber" value="' + choice.partNumber + '"><button type="submit">Use this square</button></form></div>';
-          }).join("");
-          match.innerHTML = result.partNumber || result.coreNumber
-            ? "<p>Part number: <strong>" + (result.partNumber || "") + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "") + "</strong></p>" + image + confirm + change
-            : "<p>No match. Numbers read: " + ((result.read || []).join(", ") || "none") + "</p>" + change;
-          status.textContent = "Photos deleted. The result is above.";
-        } catch (error) {
-          status.textContent = "The check did not finish. Try the photos again.";
-        }
-      });
-    </script>`);
+`);
 }
 
 function excelReport(workload, lines) {
-  const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0, total: 0 }];
+  const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0 }];
   const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
   const last = safeLines.length + 1;
-  const units = safeLines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
-  const boxTotal = safeLines.reduce((sum, line) => sum + Number(line.total || 0), 0);
   const rows = [
     ["Part #", "Core #", "QTY", "Price", "Total"],
-    ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty || 0), "$" + Number(line.price || 0), "$" + Number(line.total || 0)]),
-    ["", "Total units", units, "Price total", "$" + boxTotal]
+    ...safeLines.map((line) => [line.partNumber, line.coreNumber, line.qty, line.price, null]),
+    ["", "Total units", null, "", ""],
+    ["", "", "", "Box total", null]
   ];
-  const styles = `<?xml version="1.0" encoding="UTF-8"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf/></cellStyleXfs><cellXfs count="2"><xf/><xf applyAlignment="1"><alignment horizontal="center"/></xf></cellXfs></styleSheet>`;
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
     const r = index + 1;
     const cols = row.map((value, col) => {
       const ref = String.fromCharCode(65 + col) + r;
+      if (r > 1 && r <= last && col === 4) return `<c r="${ref}"><f>C${r}*D${r}</f></c>`;
+      if (r === last + 1 && col === 2) return `<c r="${ref}"><f>SUM(C2:C${last})</f></c>`;
+      if (r === last + 2 && col === 4) return `<c r="${ref}"><f>SUM(E2:E${last})</f></c>`;
       if (value == null || value === "") return "";
-      const center = col >= 2 || (typeof value === "number") || String(value).startsWith("$");
-      const style = center ? ' s="1"' : "";
-      if (typeof value === "number") return `<c r="${ref}"${style}><v>${value}</v></c>`;
-      return `<c r="${ref}"${style} t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
+      if (typeof value === "number") return `<c r="${ref}"><v>${value}</v></c>`;
+      return `<c r="${ref}" t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
     }).join("");
     sheet.push(`<row r="${r}">${cols}</row>`);
   });
   sheet.push(`</sheetData></worksheet>`);
   const files = {
-    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`,
+    "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
     "_rels/.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
     "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Box report" sheetId="1" r:id="rId1"/></sheets></workbook>`,
-    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`,
-    "xl/styles.xml": styles,
+    "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
     "xl/worksheets/sheet1.xml": sheet.join("")
   };
   const crcTable = new Uint32Array(256);
@@ -362,19 +293,20 @@ function header(session) {
 
 function loadReference() {
   const dir = path.join(__dirname, "reference");
-  const override = path.join(dataDir, "files", "tenant_born_again_air", "born-again-air.json");
-  const born = JSON.parse(fs.readFileSync(fs.existsSync(override) ? override : path.join(dir, "born-again-air.json"), "utf8"));
+  const born = JSON.parse(fs.readFileSync(path.join(dir, "born-again-air.json"), "utf8"));
+  const pages = JSON.parse(fs.readFileSync(path.join(dir, "four-season-pages.json"), "utf8"));
   const numbers = new Map();
   born.forEach((row) => {
     const reman = String(row.reman || "").trim();
-    if (!reman) return;
-    const entry = { partNumber: reman, coreNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw };
-    const keys = [reman, ...String(row.raw || "").match(/\d{4,}/g) || []];
-    keys.filter(Boolean).forEach((key) => {
-      if (!numbers.has(key)) numbers.set(key, entry);
+    if (reman) numbers.set(reman, { partNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || null });
+    String(row.raw || "").split(/\s+/).forEach((token) => {
+      if (/^\d{5,}$/.test(token) && !numbers.has(token)) numbers.set(token, { partNumber: reman || token, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || pages[token] || null });
     });
   });
-  return { numbers, rows: born };
+  Object.keys(pages).forEach((part) => {
+    if (!numbers.has(part)) numbers.set(part, { partNumber: part, source: "4 Season Database.pdf", raw: "", page: pages[part] });
+  });
+  return { numbers, pages };
 }
 
 let referenceCache = null;
@@ -383,127 +315,8 @@ function reference() {
   return referenceCache;
 }
 
-function photoHash(filePath) {
-  const jpeg = require("./jpeg");
-  const decoded = jpeg.decode(fs.readFileSync(filePath), { useTArray: true });
-  const size = 16;
-  const pixels = [];
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const sx = Math.min(decoded.width - 1, Math.floor(x * decoded.width / size));
-      const sy = Math.min(decoded.height - 1, Math.floor(y * decoded.height / size));
-      const i = (sy * decoded.width + sx) * 4;
-      pixels.push(decoded.data[i] * 0.3 + decoded.data[i + 1] * 0.59 + decoded.data[i + 2] * 0.11);
-    }
-  }
-  const avg = pixels.reduce((sum, value) => sum + value, 0) / pixels.length;
-  return pixels.map((value) => value > avg ? "1" : "0").join("");
-}
-
-function coreFrom(row) {
-  if (!row) return "";
-  if (row.partNumber) return String(row.partNumber);
-  return (String(row.raw || "").match(/\b\d{6,8}\b/) || [""])[0];
-}
-
-function lookupNumber(numbers, token) {
-  if (numbers.has(token)) return { row: numbers.get(token), score: token.length + 100 };
-  return null;
-}
-
-async function readPhotoNumbers(filePath) {
-  const found = new Set();
-  const add = (text) => (String(text || "").match(/\d{4,}/g) || []).forEach((token) => found.add(token));
-  try {
-    add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "6"], { encoding: "utf8" }));
-    add(require("child_process").execFileSync("tesseract", [filePath, "stdout", "--psm", "11"], { encoding: "utf8" }));
-  } catch (error) {
-    try {
-      const { createWorker } = require("tesseract.js");
-      const worker = await createWorker("eng");
-      add((await worker.recognize(filePath)).data.text);
-      await worker.terminate();
-    } catch (inner) {
-      // This photo had no readable number.
-    }
-  }
-  return [...found];
-}
-
-async function askPictureCheck(filePaths, extra) {
-  const key = process.env.XAI_API_KEY;
-  if (!key) return "";
-  const images = filePaths.slice(0, 7).map((filePath) => {
-    const data = fs.readFileSync(filePath).toString("base64");
-    return { type: "image_url", image_url: { url: "data:image/jpeg;base64," + data } };
-  });
-  const response = await fetch("https://api.x.ai/v1/chat/completions", {
-    method: "POST",
-    headers: { authorization: "Bearer " + key, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: "grok-4",
-      temperature: 0,
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: "Read only numbers printed on the compressor label or stamp. Reply with the digits you can see, separated by spaces. If no number is readable, reply NONE. Do not guess. Do not use memory. " + (extra || "") },
-          ...images
-        ]
-      }]
-    })
-  });
-  if (!response.ok) return "";
-  const payload = await response.json();
-  return String(payload.choices && payload.choices[0] && payload.choices[0].message && payload.choices[0].message.content || "");
-}
-
-async function matchPhotos(filePaths) {
-  const { numbers, rows } = reference();
-  const aliases = new Map([["84177574", "168305"]]);
-  const seen = [];
-  const hits = [];
-  const take = (token) => {
-    if (!/^\d{4,}$/.test(token)) return;
-    seen.push(token);
-    const mapped = aliases.get(token) || token;
-    let hit = lookupNumber(numbers, mapped);
-    if (!hit) {
-      const row = rows.find((item) => String(item.raw || "").includes(mapped) || String(item.reman || "") === mapped);
-      if (row) hit = { row: { partNumber: row.reman, coreNumber: row.reman, raw: row.raw }, score: mapped.length };
-    }
-    if (hit && hit.row.coreNumber) hits.push({ ...hit, token: mapped, read: token });
-  };
-  try {
-    const read = await askPictureCheck(filePaths);
-    String(read).match(/\d{4,}/g)?.forEach(take);
-  } catch (error) {
-    // The key check can fail. The local number read still runs.
-  }
-  for (const filePath of filePaths) {
-    const tokens = await readPhotoNumbers(filePath);
-    tokens.forEach(take);
-  }
-  hits.sort((left, right) => right.score - left.score);
-  const numberMatch = hits[0] || null;
-  if (numberMatch) {
-    const reman = numberMatch.row.coreNumber || numberMatch.row.partNumber;
-    return {
-      partNumber: reman,
-      coreNumber: reman,
-      file: null,
-      choices: [],
-      read: seen,
-      source: "Born Again Air reman"
-    };
-  }
-  return { partNumber: null, coreNumber: "", file: null, choices: [], read: seen, source: "no match in the loaded databases" };
-}
-
-function hamming(left, right) {
-  let score = 0;
-  const length = Math.min(left.length, right.length);
-  for (let i = 0; i < length; i += 1) if (left[i] !== right[i]) score += 1;
-  return score;
+function coreFrom(raw) {
+  return (String(raw || "").match(/\b\d{8}\b/) || [""])[0];
 }
 
 function activePriceSheet(tenantId) {
@@ -557,7 +370,7 @@ function parsePriceWorkbook(buffer) {
 
 function roleCanOpen(role, moduleKey) {
   if (role === "manager") return true;
-  return moduleKey === "core_processing" || moduleKey === "workloads";
+  return moduleKey === "core_processing" || moduleKey === "workloads" || moduleKey === "reports" || moduleKey === "pricing";
 }
 
 function send(res, status, html, headers = {}) {
@@ -751,8 +564,7 @@ const server = http.createServer(async (req, res) => {
       <div class="top"><div>${brand()}<h1>${session.tenantName}</h1>
       <p class="sub">${session.name} · ${session.role}</p></div>
       <div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
-      <div class="grid" style="margin-top:18px">${cards}</div>
-      ${session.role === "manager" && session.tenantId === "tenant_born_again_air" ? `<div class="grid" style="margin-top:12px"><a class="card" href="/modules/core-list"><strong>Core database</strong><br><span class="meta">The Born Again Air file the label check uses.</span></a></div>` : ""}`));
+      <div class="grid" style="margin-top:18px">${cards}</div>`));
     return;
   }
 
@@ -763,85 +575,23 @@ const server = http.createServer(async (req, res) => {
     }
     send(res, 200, page("Core Processing", `
       ${header(session)}<h1>Core Processing</h1>
-      <p class="sub">One compressor check. Nothing is saved.</p>
-      <div class="card" style="margin-top:18px">
-        <div id="match"></div>
-        <form id="part-form">
-          <label>Part number<input id="part-number" placeholder="Type the part number"></label>
-          <button type="submit">Look up part number</button>
-        </form>
-        <form id="check-form">
-          <div id="photos"></div>
-          <button type="button" id="take-photo">Take photo</button>
-          <button type="submit">Check databases</button>
-          <p class="meta" id="scan-status"></p>
-        </form>
-      </div>
+      <p class="sub">${session.tenantName}. Look up one core or part number.</p>
+      <form class="card" method="post" action="/core-lookup">
+        <label>Core or part number<input name="partNumber" placeholder="Type a core or part number" required></label>
+        <button type="submit">Look up</button>
+      </form>
+      <p class="meta">Looks up the number in the database. If it is not there, the fields are left blank.</p>
+      <div id="result"></div>
       <script>
-        async function fileToBase64(file) {
-          const image = await createImageBitmap(file);
-          const scale = Math.min(1, 800 / Math.max(image.width, image.height));
-          const canvas = document.createElement("canvas");
-          canvas.width = Math.max(1, Math.round(image.width * scale));
-          canvas.height = Math.max(1, Math.round(image.height * scale));
-          canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
-          const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.7));
-          const bytes = new Uint8Array(await blob.arrayBuffer());
-          let binary = "";
-          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-          return btoa(binary);
-        }
-        document.getElementById("part-form").addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const partNumber = document.getElementById("part-number").value.trim();
-          if (!partNumber) return;
-          const response = await fetch("/check-part", { method: "POST", body: new URLSearchParams({ partNumber }) });
-          const result = await response.json();
-          document.getElementById("match").innerHTML = "<p>Part number: <strong>" + partNumber + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "Not in Born Again Air Database") + "</strong></p><p class=\"meta\">Nothing was saved.</p>";
-        });
-        document.getElementById("take-photo").addEventListener("click", () => {
-          const input = document.createElement("input");
-          input.type = "file";
-          input.accept = "image/*";
-          input.capture = "environment";
-          input.addEventListener("change", () => {
-            if (!input.files[0]) return;
-            const label = document.createElement("label");
-            label.textContent = "Photo " + (document.querySelectorAll("#photos input").length + 1);
-            label.appendChild(input);
-            document.getElementById("photos").appendChild(label);
-          });
-          input.click();
-        });
-        document.getElementById("check-form").addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const status = document.getElementById("scan-status");
-          status.textContent = "Checking the databases...";
-          const files = [...document.querySelectorAll("#photos input")].map((input) => input.files[0]).filter(Boolean);
-          if (!files.length) { status.textContent = "Add at least one photo."; return; }
-          const body = new URLSearchParams();
-          for (const file of files) body.append("photo", await fileToBase64(file));
-          const response = await fetch("/check", { method: "POST", body });
-          const result = await response.json();
-          const image = result.file ? '<img src="/reference/square/' + result.file + '" alt="Database square">' : "";
-          document.getElementById("match").innerHTML = result.partNumber || result.coreNumber
-            ? "<p>Part number: <strong>" + (result.partNumber || "") + "</strong></p><p>Core number: <strong>" + (result.coreNumber || "") + "</strong></p>" + image
-            : "<p>No match in the loaded databases. Nothing was saved.</p>";
-          status.textContent = "Photos deleted. Nothing was saved.";
+        document.querySelector("form").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const form = e.target;
+          const data = new FormData(form);
+          const res = await fetch("/core-lookup", { method: "POST", body: data });
+          const json = await res.json();
+          document.getElementById("result").innerHTML = json.html || "";
         });
       </script>`));
-    return;
-  }
-
-  if (url.pathname === "/check-part" && req.method === "POST") {
-    if (!session.tenantId || !roleCanOpen(session.role, "core_processing")) {
-      send(res, 403, "Not available");
-      return;
-    }
-    const body = await parseBody(req);
-    const partNumber = String(body.get("partNumber") || "").trim();
-    const known = reference().numbers.get(partNumber);
-    send(res, 200, JSON.stringify({ partNumber, coreNumber: known ? (known.coreNumber || "") : "" }), { "content-type": "application/json" });
     return;
   }
 
@@ -872,58 +622,30 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/check" && req.method === "POST") {
+  if (url.pathname === "/core-lookup" && req.method === "POST") {
     if (!session.tenantId || !roleCanOpen(session.role, "core_processing")) {
       send(res, 403, "Not available");
       return;
     }
     const body = await parseBody(req);
-    const photos = body.getAll("photo").filter(Boolean);
-    if (!photos.length || session.tenantId !== "tenant_born_again_air") {
-      send(res, 200, JSON.stringify({ partNumber: null }), { "content-type": "application/json" });
-      return;
-    }
-    const dir = path.join(dataDir, "files", session.tenantId);
-    fs.mkdirSync(dir, { recursive: true });
-    const filePaths = photos.map((photo) => {
-      const filePath = path.join(dir, crypto.randomUUID());
-      fs.writeFileSync(filePath, Buffer.from(photo, "base64"));
-      return filePath;
-    });
-    let match = null;
-    try { match = await matchPhotos(filePaths); } catch (error) { match = null; }
-    filePaths.forEach((filePath) => fs.unlinkSync(filePath));
-    send(res, 200, JSON.stringify(match || { partNumber: null }), { "content-type": "application/json" });
-    return;
-  }
-
-  if (url.pathname === "/modules/core_processing" || url.pathname === "/modules/workloads") {
-    if (!session.tenantId || !roleCanOpen(session.role, "core_processing")) {
-      send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
-      return;
-    }
-    const workloads = db.workloads.filter((item) => item.tenantId === session.tenantId);
-    const list = workloads.map((item) => `<a class="card" href="/workloads/${item.id}"><strong>${item.name}</strong><br><span class="meta">${item.status} · ${db.scans.filter((scan) => scan.workloadId === item.id).length} cores</span></a>`).join("");
-    send(res, 200, page("Core Processing", `
-      ${header(session)}<h1>Core Processing</h1>
-      <p class="sub">${session.tenantName}. One compressor at a time.</p>
-      <form class="card" method="post" action="/workloads">
-        <label>Workload name<input name="name" required placeholder="10/5 Box 1"></label>
-        <button type="submit">Start workload</button>
-      </form>
-      <div class="grid" style="margin-top:12px">${list || `<p class="meta">No workloads yet.</p>`}</div>`));
+    const entered = String(body.get("partNumber") || "").trim();
+    const known = entered ? reference().numbers.get(entered) : null;
+    const partNumber = known ? (known.partNumber || "") : "";
+    const coreNumber = known ? (coreFrom(known.raw) || "") : "";
+    const html = `<div class="card" style="margin-top:12px"><p>Part number: <strong>${partNumber || "—"}</strong></p><p>Core number: <strong>${coreNumber || "—"}</strong></p></div>`;
+    send(res, 200, JSON.stringify({ html, partNumber, coreNumber }), { "content-type": "application/json" });
     return;
   }
 
   if (url.pathname === "/workloads" && req.method === "POST") {
-    if (!session.tenantId || !roleCanOpen(session.role, "core_processing")) {
+    if (!session.tenantId || !roleCanOpen(session.role, "workloads")) {
       send(res, 403, "Not available");
       return;
     }
     const body = await parseBody(req);
     const name = String(body.get("name") || "").trim();
     if (!name) {
-      res.writeHead(302, { location: "/modules/core_processing" });
+      res.writeHead(302, { location: "/modules/workloads" });
       res.end();
       return;
     }
@@ -938,7 +660,7 @@ const server = http.createServer(async (req, res) => {
   const workloadMatch = url.pathname.match(/^\/workloads\/([^/]+)$/);
   if (workloadMatch) {
     const workload = db.workloads.find((item) => item.id === workloadMatch[1] && item.tenantId === session.tenantId);
-    if (!workload || !roleCanOpen(session.role, "core_processing")) {
+    if (!workload || !roleCanOpen(session.role, "workloads")) {
       send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
       return;
     }
@@ -961,8 +683,8 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, page("Label", `
       ${header(session)}<h1>Core label</h1>
       <div class="card" style="max-width:420px">
-        <p>Part number: <strong>${scan.confirmedPartNumber || ""}</strong></p>
-        <p>Core number: <strong>${scan.coreNumber || ""}</strong></p>
+        <p>Part number: <strong>${scan.confirmedPartNumber || "—"}</strong></p>
+        <p>Core number: <strong>${scan.coreNumber || "—"}</strong></p>
         ${image}
         <img alt="QR code" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}">
         <p class="meta">Scan opens this square, part number, and core number.</p>
@@ -983,8 +705,7 @@ const server = http.createServer(async (req, res) => {
     const lines = qtyRows(db, workload.id).map((row) => {
       const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
       const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber);
-      const price = priceRow ? Number(priceRow.price) : 0;
-      return { partNumber: row.partNumber, coreNumber: scan && scan.coreNumber ? scan.coreNumber : "", qty: row.qty, price, total: price * row.qty };
+      return { partNumber: row.partNumber, coreNumber: scan && scan.coreNumber ? scan.coreNumber : "", qty: row.qty, price: priceRow ? Number(priceRow.price) : "" };
     });
     const file = excelReport(workload, lines);
     res.writeHead(200, {
@@ -1052,7 +773,7 @@ const server = http.createServer(async (req, res) => {
       const existing = db.scans.find((scan) => scan.workloadId === workload.id && scan.confirmedPartNumber === partNumber);
       db.scans.push({
         id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
-        confirmedPartNumber: partNumber, coreNumber: existing ? existing.coreNumber : (known ? (known.coreNumber || "") : ""),
+        confirmedPartNumber: partNumber, coreNumber: existing ? existing.coreNumber : (known ? coreFrom(known.raw) : ""),
         photoCount: 0, photosDeleted: true, inDatabase: Boolean(known),
         wasCorrected: true, confirmedBy: session.userId, confirmedAt: new Date().toISOString()
       });
@@ -1100,56 +821,27 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  const scanMatch = url.pathname.match(/^\/workloads\/([^/]+)\/scans$/);
-  if (scanMatch && req.method === "POST") {
-    const workload = db.workloads.find((item) => item.id === scanMatch[1] && item.tenantId === session.tenantId);
-    if (!workload || !roleCanOpen(session.role, "core_processing")) {
-      send(res, 403, "Not available");
-      return;
-    }
-    const body = await parseBody(req);
-    const photos = body.getAll("photo").filter(Boolean);
-    if (!photos.length) {
-      send(res, 400, "Add at least one photo, or type the part number.", { "content-type": "application/json" });
-      return;
-    }
-    if (session.tenantId !== "tenant_born_again_air") {
-      send(res, 200, JSON.stringify({ partNumber: null, page: null }), { "content-type": "application/json" });
-      return;
-    }
-    const dir = path.join(dataDir, "files", session.tenantId);
-    fs.mkdirSync(dir, { recursive: true });
-    const filePaths = photos.map((photo) => {
-      const filePath = path.join(dir, crypto.randomUUID());
-      fs.writeFileSync(filePath, Buffer.from(photo, "base64"));
-      return filePath;
-    });
-    let match = null;
-    try { match = await matchPhotos(filePaths); } catch (error) { match = null; }
-    filePaths.forEach((filePath) => fs.unlinkSync(filePath));
-    send(res, 200, JSON.stringify(match || { partNumber: null, page: null, source: null, visual: [] }), { "content-type": "application/json" });
-    return;
-  }
-
   const confirmMatch = url.pathname.match(/^\/workloads\/([^/]+)\/confirm$/);
   if (confirmMatch && req.method === "POST") {
     const workload = db.workloads.find((item) => item.id === confirmMatch[1] && item.tenantId === session.tenantId);
-    if (!workload || !roleCanOpen(session.role, "core_processing")) {
+    if (!workload || !roleCanOpen(session.role, "workloads")) {
       send(res, 403, "Not available");
       return;
     }
     const body = await parseBody(req);
-    const partNumber = String(body.get("partNumber") || "").trim();
-    if (!partNumber) {
+    const entered = String(body.get("partNumber") || "").trim();
+    if (!entered) {
       res.writeHead(302, { location: `/workloads/${workload.id}` });
       res.end();
       return;
     }
-    const known = reference().numbers.get(partNumber);
+    const known = reference().numbers.get(entered);
+    const partNumber = known ? (known.partNumber || "") : "";
+    const coreNumber = known ? (coreFrom(known.raw) || "") : "";
     db.scans.push({
       id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
-      confirmedPartNumber: partNumber, coreNumber: known ? (known.coreNumber || "") : "",
-      photoCount: 3, photosDeleted: true, inDatabase: Boolean(known),
+      confirmedPartNumber: partNumber, coreNumber: coreNumber,
+      photoCount: 0, photosDeleted: true, inDatabase: Boolean(known),
       wasCorrected: true, confirmedBy: session.userId, confirmedAt: new Date().toISOString()
     });
     save(db);
@@ -1246,153 +938,6 @@ const server = http.createServer(async (req, res) => {
       ${header(session)}<h1>Reports</h1>
       <p class="sub">Boxes processed by this company, including employee boxes.</p>
       <div class="card" style="margin-top:18px"><table><tr><th>P.O.</th><th>Box</th><th>Cores</th><th>Ticket</th><th>Excel</th></tr>${rows || `<tr><td colspan="5">No boxes yet.</td></tr>`}</table></div>`));
-    return;
-  }
-
-  if (url.pathname === "/modules/core-list") {
-    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
-      send(res, 404, page("Not available", `<h1>Not available</h1><p>Employees do not see the core database.</p><a class="button" href="/dashboard">Back</a>`));
-      return;
-    }
-    const dir = path.join(dataDir, "files", session.tenantId);
-    const active = fs.existsSync(dir) ? fs.readdirSync(dir).find((name) => name.startsWith("core-database.")) : null;
-    const fileName = active || "Born Again Air Database.pdf";
-    send(res, 200, page("Core database", `
-      ${header(session)}<h1>Core database</h1>
-      <p class="sub">The active file is the one the label check uses.</p>
-      <div class="card" style="margin-top:18px">
-        <p>Active file</p>
-        <p><a class="button" href="/core-list/file">Born Again Air Database.xlsx</a></p>
-        <p class="meta">Click the file to open it. Edit it, then update it here.</p>
-        <form id="list-form">
-          <label>Updated file<input id="list-file" type="file" accept=".pdf,.xlsx,.csv,.json"></label>
-          <button type="submit">Update active file</button>
-          <p class="meta" id="list-status"></p>
-        </form>
-      </div>
-      <script>
-        document.getElementById("list-form").addEventListener("submit", async (event) => {
-          event.preventDefault();
-          const file = document.getElementById("list-file").files[0];
-          const status = document.getElementById("list-status");
-          status.textContent = "Saving the core database...";
-          const bytes = new Uint8Array(await file.arrayBuffer());
-          let binary = "";
-          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
-          const body = new URLSearchParams();
-          body.set("name", file.name);
-          body.set("file", btoa(binary));
-          const response = await fetch("/core-list/upload", { method: "POST", body });
-          const result = await response.json();
-          status.textContent = result.message || "Saved.";
-          if (result.ok) setTimeout(() => location.reload(), 600);
-        });
-      </script>`));
-    return;
-  }
-
-  if (url.pathname === "/core-list/file") {
-    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
-      send(res, 404, "Not available");
-      return;
-    }
-    const dir = path.join(dataDir, "files", session.tenantId);
-    const uploaded = fs.existsSync(dir) ? fs.readdirSync(dir).find((name) => name === "core-database.xlsx") : null;
-    if (uploaded) {
-      res.writeHead(200, { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'inline; filename="Born Again Air Database.xlsx"' });
-      res.end(fs.readFileSync(path.join(dir, uploaded)));
-      return;
-    }
-    const jsonFile = path.join(dir, "born-again-air.json");
-    const rows = JSON.parse(fs.readFileSync(fs.existsSync(jsonFile) ? jsonFile : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
-    const sheetRows = [["Core", "Row"], ...rows.map((row) => [row.reman || "", row.raw || ""])];
-    const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
-    const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
-    sheetRows.forEach((row, index) => {
-      const r = index + 1;
-      const cols = row.map((value, col) => {
-        const ref = String.fromCharCode(65 + col) + r;
-        return `<c r="${ref}" t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
-      }).join("");
-      sheet.push(`<row r="${r}">${cols}</row>`);
-    });
-    sheet.push(`</sheetData></worksheet>`);
-    const files = {
-      "[Content_Types].xml": `<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`,
-      "_rels/.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`,
-      "xl/workbook.xml": `<?xml version="1.0" encoding="UTF-8"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Core database" sheetId="1" r:id="rId1"/></sheets></workbook>`,
-      "xl/_rels/workbook.xml.rels": `<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`,
-      "xl/worksheets/sheet1.xml": sheet.join("")
-    };
-    const crcTable = new Uint32Array(256);
-    for (let n = 0; n < 256; n += 1) { let c = n; for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; crcTable[n] = c; }
-    const crc32 = (buf) => { let c = 0xffffffff; for (const byte of buf) c = crcTable[(c ^ byte) & 255] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-    const parts = []; const central = []; let offset = 0;
-    Object.entries(files).forEach(([name, text]) => {
-      const fileName = Buffer.from(name); const data = Buffer.from(text); const crc = crc32(data);
-      const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(fileName.length, 26);
-      parts.push(local, fileName, data);
-      const head = Buffer.alloc(46); head.writeUInt32LE(0x02014b50, 0); head.writeUInt16LE(20, 4); head.writeUInt16LE(20, 6); head.writeUInt32LE(crc, 16); head.writeUInt32LE(data.length, 20); head.writeUInt32LE(data.length, 24); head.writeUInt16LE(fileName.length, 28); head.writeUInt32LE(offset, 42);
-      central.push(head, fileName); offset += local.length + fileName.length + data.length;
-    });
-    const centralBuf = Buffer.concat(central); const end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(Object.keys(files).length, 8); end.writeUInt16LE(Object.keys(files).length, 10); end.writeUInt32LE(centralBuf.length, 12); end.writeUInt32LE(offset, 16);
-    res.writeHead(200, { "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "content-disposition": 'inline; filename="Born Again Air Database.xlsx"' });
-    res.end(Buffer.concat([...parts, centralBuf, end]));
-    return;
-  }
-
-  if (url.pathname === "/core-list/upload" && req.method === "POST") {
-    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
-      send(res, 403, JSON.stringify({ ok: false, message: "Not available" }), { "content-type": "application/json" });
-      return;
-    }
-    const body = await parseBody(req);
-    const name = String(body.get("name") || "");
-    const bytes = Buffer.from(String(body.get("file") || ""), "base64");
-    const ext = (name.match(/\.[a-z0-9]+$/i) || [".pdf"])[0].toLowerCase();
-    const dir = path.join(dataDir, "files", session.tenantId);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.readdirSync(dir).filter((item) => item.startsWith("core-database.")).forEach((item) => fs.unlinkSync(path.join(dir, item)));
-    fs.writeFileSync(path.join(dir, "core-database" + ext), bytes);
-    if (name.endsWith(".json") || name.endsWith(".xlsx") || name.endsWith(".csv")) {
-      let rows = [];
-      if (name.endsWith(".json")) rows = JSON.parse(bytes.toString("utf8"));
-      else if (name.endsWith(".xlsx")) {
-        rows = parsePriceWorkbook(bytes).map((row) => ({ reman: String(row.coreBase || row.basePn || "").trim(), raw: [row.basePn, row.coreBase, row.model, row.description, row.buyQty].filter(Boolean).join(" "), source: "upload" })).filter((row) => row.reman);
-      } else {
-        rows = bytes.toString("utf8").split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
-          const parts = line.split(",");
-          return { reman: parts[0].replace(/"/g, ""), raw: parts.slice(1).join(",").replace(/"/g, ""), source: "upload" };
-        });
-      }
-      if (rows.length) {
-        fs.writeFileSync(path.join(dir, "born-again-air.json"), JSON.stringify(rows, null, 2));
-        referenceCache = null;
-      }
-    }
-    send(res, 200, JSON.stringify({ ok: true, message: "Core database updated." }), { "content-type": "application/json" });
-    return;
-  }
-
-  if (url.pathname === "/core-list/save" && req.method === "POST") {
-    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
-      send(res, 403, "Not available");
-      return;
-    }
-    const body = await parseBody(req);
-    const file = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
-    const rows = JSON.parse(fs.readFileSync(fs.existsSync(file) ? file : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
-    body.getAll("index").forEach((index, position) => {
-      const row = rows[Number(index)];
-      if (!row) return;
-      row.reman = body.getAll("reman")[position] || row.reman;
-      row.raw = body.getAll("raw")[position] || row.raw;
-    });
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(rows, null, 2));
-    referenceCache = null;
-    res.writeHead(302, { location: "/modules/core-list" });
-    res.end();
     return;
   }
 
@@ -1521,7 +1066,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, page(mod.name, `
       <p class="mark">${session.tenantName}</p><h1>${mod.name}</h1><p class="sub">${mod.description}</p>
       <div class="card" style="margin-top:18px"><p>This module is enabled for this company. Processing screens are not built yet.</p>
-      <p class="meta">Next build: workload, photo, confirm or change part number, label, report.</p>
+      <p class="meta">Workloads, labels, price sheets, and reports.</p>
       <a class="button" href="/dashboard">Back to workspace</a></div>`));
     return;
   }

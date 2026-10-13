@@ -1,0 +1,50 @@
+:root {
+  --ink: #1c1915;
+  --muted: #6d645b;
+  --line: #e4ddd3;
+  --paper: #f6f3ee;
+  --card: #fffcf8;
+  --brand: #1f4d3a;
+  --brand-2: #c46a2d;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: Georgia, "Iowan Old Style", "Palatino Linotype", serif;
+  color: var(--ink);
+  background: var(--paper);
+}
+a { color: inherit; }
+button, input { font: inherit; }
+.shell { max-width: 880px; margin: 0 auto; padding: 28px 18px 64px; }
+.top {
+  display: flex; justify-content: space-between; gap: 16px; align-items: flex-end;
+  border-bottom: 1px solid var(--line); padding-bottom: 16px; margin-bottom: 22px;
+}
+.mark { font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--brand); }
+h1 { font-size: 32px; line-height: 1.1; margin: 6px 0; font-weight: 600; }
+.sub { color: var(--muted); margin: 0; }
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px;
+}
+.grid { display: grid; gap: 12px; }
+@media (min-width: 700px) { .grid.modules { grid-template-columns: 1fr 1fr; } }
+.module { display: block; text-decoration: none; }
+.module strong { display: block; font-size: 18px; margin-bottom: 4px; }
+.module span { color: var(--muted); font-size: 15px; }
+form { display: grid; gap: 12px; }
+label { display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+input {
+  border: 1px solid var(--line); background: white; border-radius: 10px; padding: 12px 14px; color: var(--ink);
+}
+button, .button {
+  border: 0; background: var(--brand); color: white; border-radius: 10px; padding: 12px 14px;
+  text-decoration: none; display: inline-block; cursor: pointer;
+}
+.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.error { background: #f8e8e2; color: #8a3418; padding: 10px 12px; border-radius: 10px; }
+.meta { font-size: 14px; color: var(--muted); }
+table { width: 100%; border-collapse: collapse; }
+th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: 15px; }
+.accounts { margin-top: 18px; }
+.accounts li { margin: 4px 0; }
