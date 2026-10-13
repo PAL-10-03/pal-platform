@@ -274,23 +274,22 @@ function workloadPage(session, db, workload) {
 }
 
 function excelReport(workload, lines) {
-  const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0 }];
+  const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0, total: 0 }];
   const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
   const last = safeLines.length + 1;
+  const units = safeLines.reduce((sum, line) => sum + Number(line.qty || 0), 0);
+  const boxTotal = safeLines.reduce((sum, line) => sum + Number(line.total || 0), 0);
   const rows = [
     ["Part #", "Core #", "QTY", "Price", "Total"],
-    ...safeLines.map((line) => [line.partNumber, line.coreNumber, line.qty, line.price, null]),
-    ["", "Total units", null, "", ""],
-    ["", "", "", "Box total", null]
+    ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty || 0), Number(line.price || 0), Number(line.total || 0)]),
+    ["", "Total units", units, "", ""],
+    ["", "", "", "Box total", boxTotal]
   ];
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
     const r = index + 1;
     const cols = row.map((value, col) => {
       const ref = String.fromCharCode(65 + col) + r;
-      if (r > 1 && r <= last && col === 4) return `<c r="${ref}"><f>C${r}*D${r}</f></c>`;
-      if (r === last + 1 && col === 2) return `<c r="${ref}"><f>SUM(C2:C${last})</f></c>`;
-      if (r === last + 2 && col === 4) return `<c r="${ref}"><f>SUM(E2:E${last})</f></c>`;
       if (value == null || value === "") return "";
       if (typeof value === "number") return `<c r="${ref}"><v>${value}</v></c>`;
       return `<c r="${ref}" t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
@@ -359,7 +358,8 @@ function header(session) {
 
 function loadReference() {
   const dir = path.join(__dirname, "reference");
-  const born = JSON.parse(fs.readFileSync(path.join(dir, "born-again-air.json"), "utf8"));
+  const override = path.join(dataDir, "files", "tenant_born_again_air", "born-again-air.json");
+  const born = JSON.parse(fs.readFileSync(fs.existsSync(override) ? override : path.join(dir, "born-again-air.json"), "utf8"));
   const pages = JSON.parse(fs.readFileSync(path.join(dir, "four-season-pages.json"), "utf8"));
   const numbers = new Map();
   born.forEach((row) => {
@@ -746,7 +746,8 @@ const server = http.createServer(async (req, res) => {
       <div class="top"><div>${brand()}<h1>${session.tenantName}</h1>
       <p class="sub">${session.name} · ${session.role}</p></div>
       <div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
-      <div class="grid" style="margin-top:18px">${cards}</div>`));
+      <div class="grid" style="margin-top:18px">${cards}</div>
+      ${session.role === "manager" && session.tenantId === "tenant_born_again_air" ? `<div class="grid" style="margin-top:12px"><a class="card" href="/modules/core-list"><strong>Core list</strong><br><span class="meta">View and edit the Born Again Air list.</span></a></div>` : ""}`));
     return;
   }
 
@@ -977,7 +978,8 @@ const server = http.createServer(async (req, res) => {
     const lines = qtyRows(db, workload.id).map((row) => {
       const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
       const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber);
-      return { partNumber: row.partNumber, coreNumber: scan && scan.coreNumber ? scan.coreNumber : "", qty: row.qty, price: priceRow ? Number(priceRow.price) : "" };
+      const price = priceRow ? Number(priceRow.price) : 0;
+      return { partNumber: row.partNumber, coreNumber: scan && scan.coreNumber ? scan.coreNumber : "", qty: row.qty, price, total: price * row.qty };
     });
     const file = excelReport(workload, lines);
     res.writeHead(200, {
@@ -1239,6 +1241,121 @@ const server = http.createServer(async (req, res) => {
       ${header(session)}<h1>Reports</h1>
       <p class="sub">Boxes processed by this company, including employee boxes.</p>
       <div class="card" style="margin-top:18px"><table><tr><th>P.O.</th><th>Box</th><th>Cores</th><th>Ticket</th><th>Excel</th></tr>${rows || `<tr><td colspan="5">No boxes yet.</td></tr>`}</table></div>`));
+    return;
+  }
+
+  if (url.pathname === "/modules/core-list") {
+    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
+      send(res, 404, page("Not available", `<h1>Not available</h1><p>Employees do not see the core list.</p><a class="button" href="/dashboard">Back</a>`));
+      return;
+    }
+    const file = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
+    const rows = JSON.parse(fs.readFileSync(fs.existsSync(file) ? file : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
+    const table = rows.slice(0, 80).map((row, index) => "<tr><td><input name=\"reman\" value=\"" + (row.reman || "") + "\"></td><td><input name=\"raw\" value=\"" + String(row.raw || "").replace(/\"/g, "") + "\"></td><td><input type=\"hidden\" name=\"index\" value=\"" + index + "\"></td></tr>").join("");
+    send(res, 200, page("Core list", `
+      ${header(session)}<h1>Core list</h1>
+      <p class="sub">Managers only. This is the Born Again Air list the label check uses.</p>
+      <div class="card" style="margin-top:18px">
+        <p><a class="button" href="/core-list/file">Download list</a></p>
+        <form id="list-form">
+          <label>Updated Excel or JSON<input id="list-file" type="file" accept=".xlsx,.json,.csv"></label>
+          <button type="submit">Update list</button>
+          <p class="meta" id="list-status"></p>
+        </form>
+      </div>
+      <form class="card" method="post" action="/core-list/save" style="margin-top:12px">
+        <table><tr><th>Core</th><th>Row</th></tr>${table}</table>
+        <p class="meta">Showing the first 80 rows. Download the file to edit the rest.</p>
+        <button type="submit">Save edits</button>
+      </form>
+      <script>
+        document.getElementById("list-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const file = document.getElementById("list-file").files[0];
+          const status = document.getElementById("list-status");
+          status.textContent = "Saving the list...";
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+          const body = new URLSearchParams();
+          body.set("name", file.name);
+          body.set("file", btoa(binary));
+          const response = await fetch("/core-list/upload", { method: "POST", body });
+          const result = await response.json();
+          status.textContent = result.message || "Saved.";
+          if (result.ok) setTimeout(() => location.reload(), 600);
+        });
+      </script>`));
+    return;
+  }
+
+  if (url.pathname === "/core-list/file") {
+    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
+      send(res, 404, "Not available");
+      return;
+    }
+    const file = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
+    const rows = JSON.parse(fs.readFileSync(fs.existsSync(file) ? file : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
+    const csv = ["core,row", ...rows.map((row) => `"${row.reman || ""}","${String(row.raw || "").replace(/"/g, '""')}"`)].join("\n");
+    res.writeHead(200, { "content-type": "text/csv", "content-disposition": "attachment; filename=born-again-air-list.csv" });
+    res.end(csv);
+    return;
+  }
+
+  if (url.pathname === "/core-list/upload" && req.method === "POST") {
+    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
+      send(res, 403, JSON.stringify({ ok: false, message: "Not available" }), { "content-type": "application/json" });
+      return;
+    }
+    const body = await parseBody(req);
+    const name = String(body.get("name") || "");
+    const bytes = Buffer.from(String(body.get("file") || ""), "base64");
+    let rows = [];
+    if (name.endsWith(".json")) rows = JSON.parse(bytes.toString("utf8"));
+    else if (name.endsWith(".xlsx")) {
+      const sheetRows = parsePriceWorkbook(bytes);
+      rows = sheetRows.map((row) => ({ reman: String(row.coreBase || row.basePn || "").trim(), raw: [row.basePn, row.coreBase, row.model, row.description, row.buyQty].filter(Boolean).join(" "), source: "upload" })).filter((row) => row.reman);
+      if (!rows.length) {
+        send(res, 200, JSON.stringify({ ok: false, message: "The Excel file had no rows. Use column A for the core number." }), { "content-type": "application/json" });
+        return;
+      }
+    }
+    else if (name.endsWith(".csv")) {
+      rows = bytes.toString("utf8").split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
+        const parts = line.split(",");
+        return { reman: parts[0].replace(/"/g, ""), raw: parts.slice(1).join(",").replace(/"/g, ""), source: "upload" };
+      });
+    } else {
+      send(res, 200, JSON.stringify({ ok: false, message: "Upload an Excel, CSV, or JSON list." }), { "content-type": "application/json" });
+      return;
+    }
+    const dir = path.join(dataDir, "files", session.tenantId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "born-again-air.json"), JSON.stringify(rows, null, 2));
+    referenceCache = null;
+    send(res, 200, JSON.stringify({ ok: true, message: "List updated." }), { "content-type": "application/json" });
+    return;
+  }
+
+  if (url.pathname === "/core-list/save" && req.method === "POST") {
+    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
+      send(res, 403, "Not available");
+      return;
+    }
+    const body = await parseBody(req);
+    const file = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
+    const rows = JSON.parse(fs.readFileSync(fs.existsSync(file) ? file : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
+    body.getAll("index").forEach((index, position) => {
+      const row = rows[Number(index)];
+      if (!row) return;
+      row.reman = body.getAll("reman")[position] || row.reman;
+      row.raw = body.getAll("raw")[position] || row.raw;
+    });
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(rows, null, 2));
+    referenceCache = null;
+    res.writeHead(302, { location: "/modules/core-list" });
+    res.end();
     return;
   }
 
