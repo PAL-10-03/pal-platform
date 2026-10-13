@@ -281,9 +281,8 @@ function excelReport(workload, lines) {
   const boxTotal = safeLines.reduce((sum, line) => sum + Number(line.total || 0), 0);
   const rows = [
     ["Part #", "Core #", "QTY", "Price", "Total"],
-    ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty || 0), Number(line.price || 0), Number(line.total || 0)]),
-    ["", "Total units", units, "", ""],
-    ["", "", "", "Box total", boxTotal]
+    ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty || 0), "$" + Number(line.price || 0), "$" + Number(line.total || 0)]),
+    ["", "Total units", units, "Order total", "$" + boxTotal]
   ];
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
@@ -747,7 +746,7 @@ const server = http.createServer(async (req, res) => {
       <p class="sub">${session.name} · ${session.role}</p></div>
       <div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
       <div class="grid" style="margin-top:18px">${cards}</div>
-      ${session.role === "manager" && session.tenantId === "tenant_born_again_air" ? `<div class="grid" style="margin-top:12px"><a class="card" href="/modules/core-list"><strong>Core list</strong><br><span class="meta">View and edit the Born Again Air list.</span></a></div>` : ""}`));
+      ${session.role === "manager" && session.tenantId === "tenant_born_again_air" ? `<div class="grid" style="margin-top:12px"><a class="card" href="/modules/core-list"><strong>Core database</strong><br><span class="meta">The Born Again Air file the label check uses.</span></a></div>` : ""}`));
     return;
   }
 
@@ -1246,34 +1245,31 @@ const server = http.createServer(async (req, res) => {
 
   if (url.pathname === "/modules/core-list") {
     if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
-      send(res, 404, page("Not available", `<h1>Not available</h1><p>Employees do not see the core list.</p><a class="button" href="/dashboard">Back</a>`));
+      send(res, 404, page("Not available", `<h1>Not available</h1><p>Employees do not see the core database.</p><a class="button" href="/dashboard">Back</a>`));
       return;
     }
-    const file = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
-    const rows = JSON.parse(fs.readFileSync(fs.existsSync(file) ? file : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
-    const table = rows.slice(0, 80).map((row, index) => "<tr><td><input name=\"reman\" value=\"" + (row.reman || "") + "\"></td><td><input name=\"raw\" value=\"" + String(row.raw || "").replace(/\"/g, "") + "\"></td><td><input type=\"hidden\" name=\"index\" value=\"" + index + "\"></td></tr>").join("");
-    send(res, 200, page("Core list", `
-      ${header(session)}<h1>Core list</h1>
-      <p class="sub">Managers only. This is the Born Again Air list the label check uses.</p>
+    const dir = path.join(dataDir, "files", session.tenantId);
+    const active = fs.existsSync(dir) ? fs.readdirSync(dir).find((name) => name.startsWith("core-database.")) : null;
+    const fileName = active || "Born Again Air Database.pdf";
+    send(res, 200, page("Core database", `
+      ${header(session)}<h1>Core database</h1>
+      <p class="sub">The active file is the one the label check uses.</p>
       <div class="card" style="margin-top:18px">
-        <p><a class="button" href="/core-list/file">Download list</a></p>
+        <p>Active file</p>
+        <p><a class="button" href="/core-list/file">${fileName.replace("core-database", "Born Again Air Database")}</a></p>
+        <p class="meta">Click the file to open it. Edit it, then update it here.</p>
         <form id="list-form">
-          <label>Updated Excel or JSON<input id="list-file" type="file" accept=".xlsx,.json,.csv"></label>
-          <button type="submit">Update list</button>
+          <label>Updated file<input id="list-file" type="file" accept=".pdf,.xlsx,.csv,.json"></label>
+          <button type="submit">Update active file</button>
           <p class="meta" id="list-status"></p>
         </form>
       </div>
-      <form class="card" method="post" action="/core-list/save" style="margin-top:12px">
-        <table><tr><th>Core</th><th>Row</th></tr>${table}</table>
-        <p class="meta">Showing the first 80 rows. Download the file to edit the rest.</p>
-        <button type="submit">Save edits</button>
-      </form>
       <script>
         document.getElementById("list-form").addEventListener("submit", async (event) => {
           event.preventDefault();
           const file = document.getElementById("list-file").files[0];
           const status = document.getElementById("list-status");
-          status.textContent = "Saving the list...";
+          status.textContent = "Saving the core database...";
           const bytes = new Uint8Array(await file.arrayBuffer());
           let binary = "";
           for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
@@ -1294,11 +1290,15 @@ const server = http.createServer(async (req, res) => {
       send(res, 404, "Not available");
       return;
     }
-    const file = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
-    const rows = JSON.parse(fs.readFileSync(fs.existsSync(file) ? file : path.join(__dirname, "reference", "born-again-air.json"), "utf8"));
-    const csv = ["core,row", ...rows.map((row) => `"${row.reman || ""}","${String(row.raw || "").replace(/"/g, '""')}"`)].join("\n");
-    res.writeHead(200, { "content-type": "text/csv", "content-disposition": "attachment; filename=born-again-air-list.csv" });
-    res.end(csv);
+    const dir = path.join(dataDir, "files", session.tenantId);
+    const active = fs.existsSync(dir) ? fs.readdirSync(dir).find((name) => name.startsWith("core-database.")) : null;
+    const file = active ? path.join(dir, active) : path.join(__dirname, "reference", "Born Again Air Database.pdf");
+    const fallback = path.join("/workspace/attachments/Born Again Air Database.pdf");
+    const source = fs.existsSync(file) ? file : (fs.existsSync(fallback) ? fallback : path.join(__dirname, "reference", "born-again-air.json"));
+    const name = path.basename(source);
+    const type = name.endsWith(".pdf") ? "application/pdf" : name.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/octet-stream";
+    res.writeHead(200, { "content-type": type, "content-disposition": `inline; filename="${name}"` });
+    res.end(fs.readFileSync(source));
     return;
   }
 
@@ -1310,30 +1310,28 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req);
     const name = String(body.get("name") || "");
     const bytes = Buffer.from(String(body.get("file") || ""), "base64");
-    let rows = [];
-    if (name.endsWith(".json")) rows = JSON.parse(bytes.toString("utf8"));
-    else if (name.endsWith(".xlsx")) {
-      const sheetRows = parsePriceWorkbook(bytes);
-      rows = sheetRows.map((row) => ({ reman: String(row.coreBase || row.basePn || "").trim(), raw: [row.basePn, row.coreBase, row.model, row.description, row.buyQty].filter(Boolean).join(" "), source: "upload" })).filter((row) => row.reman);
-      if (!rows.length) {
-        send(res, 200, JSON.stringify({ ok: false, message: "The Excel file had no rows. Use column A for the core number." }), { "content-type": "application/json" });
-        return;
-      }
-    }
-    else if (name.endsWith(".csv")) {
-      rows = bytes.toString("utf8").split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
-        const parts = line.split(",");
-        return { reman: parts[0].replace(/"/g, ""), raw: parts.slice(1).join(",").replace(/"/g, ""), source: "upload" };
-      });
-    } else {
-      send(res, 200, JSON.stringify({ ok: false, message: "Upload an Excel, CSV, or JSON list." }), { "content-type": "application/json" });
-      return;
-    }
+    const ext = (name.match(/\.[a-z0-9]+$/i) || [".pdf"])[0].toLowerCase();
     const dir = path.join(dataDir, "files", session.tenantId);
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "born-again-air.json"), JSON.stringify(rows, null, 2));
-    referenceCache = null;
-    send(res, 200, JSON.stringify({ ok: true, message: "List updated." }), { "content-type": "application/json" });
+    fs.readdirSync(dir).filter((item) => item.startsWith("core-database.")).forEach((item) => fs.unlinkSync(path.join(dir, item)));
+    fs.writeFileSync(path.join(dir, "core-database" + ext), bytes);
+    if (name.endsWith(".json") || name.endsWith(".xlsx") || name.endsWith(".csv")) {
+      let rows = [];
+      if (name.endsWith(".json")) rows = JSON.parse(bytes.toString("utf8"));
+      else if (name.endsWith(".xlsx")) {
+        rows = parsePriceWorkbook(bytes).map((row) => ({ reman: String(row.coreBase || row.basePn || "").trim(), raw: [row.basePn, row.coreBase, row.model, row.description, row.buyQty].filter(Boolean).join(" "), source: "upload" })).filter((row) => row.reman);
+      } else {
+        rows = bytes.toString("utf8").split(/\r?\n/).slice(1).filter(Boolean).map((line) => {
+          const parts = line.split(",");
+          return { reman: parts[0].replace(/"/g, ""), raw: parts.slice(1).join(",").replace(/"/g, ""), source: "upload" };
+        });
+      }
+      if (rows.length) {
+        fs.writeFileSync(path.join(dir, "born-again-air.json"), JSON.stringify(rows, null, 2));
+        referenceCache = null;
+      }
+    }
+    send(res, 200, JSON.stringify({ ok: true, message: "Core database updated." }), { "content-type": "application/json" });
     return;
   }
 
