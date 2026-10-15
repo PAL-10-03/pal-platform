@@ -1,0 +1,41 @@
+PAL Business Solutions — open the test on your computer and phone
+
+You do not need to write code. Do these steps in order.
+
+1. Download PAL-platform-test.zip.
+2. Save it to your Desktop.
+3. Right-click the zip file.
+4. Click Extract All.
+5. Click Extract. A folder named pal-platform opens.
+6. Double-click START-PAL.bat.
+7. If a window says Node.js is not installed, install the LTS Windows version from the page that opens, click Next through the installer, then double-click START-PAL.bat again.
+8. If Windows asks to allow Node.js on private networks, click Allow.
+9. Your browser opens to http://localhost:3000.
+10. Leave the black window open. Closing it stops PAL.
+
+Sign in with one of these test accounts:
+
+PAL Admin
+admin@pal.local
+pal-admin
+
+Born Again Air manager
+manager@bornagainair.local
+manager
+
+Born Again Air employee
+employee@bornagainair.local
+employee
+
+Second test customer
+manager@northwind.local
+manager
+
+Phone test, same Wi-Fi as the computer:
+
+1. Look at the black window.
+2. Find the line that starts with "On your phone".
+3. Type that address into the phone browser.
+4. It looks like http://192.168.1.20:3000
+
+Born Again Air should show Core Processing. Northwind should not.
