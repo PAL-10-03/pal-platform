@@ -1,4 +1,4 @@
-// PAL version 79 - Print downloads a PDF
+// PAL version 80 - Labels and reports download as PDF
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -232,7 +232,7 @@ function workloadPage(session, db, workload) {
     <div class="card" style="margin-top:12px">
       <table><tr><th>Part #</th><th>Core #</th><th>QTY</th><th>Label</th><th></th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
     </div>
-    <p style="margin-top:18px">${workload.status === "complete" && session.role === "manager" ? `<a class="button" href="/workloads/${workload.id}/ticket">Make P.O. ticket</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a>` : workload.status === "complete" ? `<p>Box complete. Quantities can still be edited.</p>` : `<form method="post" action="/workloads/${workload.id}/finish"><button type="submit">Finish box</button></form>`} <a class="button ghost" href="/modules/workloads">Back to workloads</a></p>
+    <p style="margin-top:18px">${workload.status === "complete" && session.role === "manager" ? `<a class="button" href="/workloads/${workload.id}/ticket">Make P.O. ticket</a> <a class="button" href="/workloads/${workload.id}/report.pdf">Excel report</a>` : workload.status === "complete" ? `<p>Box complete. Quantities can still be edited.</p>` : `<form method="post" action="/workloads/${workload.id}/finish"><button type="submit">Finish box</button></form>`} <a class="button ghost" href="/modules/workloads">Back to workloads</a></p>
 `);
 }
 
@@ -905,20 +905,28 @@ const server = http.createServer(async (req, res) => {
       send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
       return;
     }
-    const link = `${url.origin}/labels/${scan.id}`;
     const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "fs-squares.json"), "utf8"));
     const square = squares.find((item) => item.partNumber === scan.confirmedPartNumber);
-    const image = square ? `<img src="/reference/square/${square.file}" alt="Catalog square">` : "";
-    const ask = url.searchParams.get("ask") ? `<script>if (confirm("Print barcode?")) window.print();</script>` : "";
-    send(res, 200, page("Label", `
-      ${header(session)}<h1>Core label</h1>
-      <div class="card" style="max-width:420px">
-        <p>Core number: <strong>${scan.coreNumber || "—"}</strong></p>
-        <p>Part number: <strong>${scan.confirmedPartNumber || "—"}</strong></p>
-        ${image}
-      </div>
-      <p style="margin-top:18px"><a class="button" href="javascript:window.print()">Print</a> <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a></p>
-      ${ask}`));
+    const doc = new PDFDocument({ size: [288, 216], margin: 12 });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => {
+      const pdf = Buffer.concat(chunks);
+      res.writeHead(200, {
+        "content-type": "application/pdf",
+        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`
+      });
+      res.end(pdf);
+    });
+    doc.fontSize(14).text("Core: " + (scan.coreNumber || "—"));
+    doc.fontSize(12).text("Part: " + (scan.confirmedPartNumber || "—"));
+    if (square) {
+      const imgPath = path.join(__dirname, "reference", "fs-parts", square.file);
+      if (fs.existsSync(imgPath)) {
+        try { doc.image(imgPath, { fit: [260, 120], align: "center" }); } catch (e) {}
+      }
+    }
+    doc.end();
     return;
   }
 
@@ -952,6 +960,65 @@ const server = http.createServer(async (req, res) => {
       "content-disposition": `attachment; filename="${workload.name.replace(/[^a-zA-Z0-9._-]/g, "") || "box"}-report.xlsx"`
     });
     res.end(file);
+    return;
+  }
+
+  const reportPdfMatch = url.pathname.match(/^\/workloads\/([^/]+)\/report\.pdf$/);
+  if (reportPdfMatch) {
+    const workload = db.workloads.find((item) => item.id === reportPdfMatch[1] && item.tenantId === session.tenantId);
+    if (!workload || session.role !== "manager") {
+      send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
+      return;
+    }
+    const prices = activePriceSheet(session.tenantId);
+    const isCompressor = workload.type === "compressor";
+    const REBUILD = 65.5;
+    let units = 0;
+    let boxTotal = 0;
+    const lines = qtyRows(db, workload.id).map((row) => {
+      const coreNum = row.coreNumber || "";
+      const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
+      const corePrice = priceRow ? Number(priceRow.price) : 0;
+      let unitPrice, coreChargeAmt;
+      if (isCompressor) {
+        coreChargeAmt = row.coreCharge ? corePrice : 0;
+        unitPrice = REBUILD;
+      } else {
+        coreChargeAmt = 0;
+        unitPrice = corePrice;
+      }
+      const line = (unitPrice + coreChargeAmt) * row.qty;
+      units += row.qty;
+      boxTotal += line;
+      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: unitPrice, coreCharge: coreChargeAmt, line };
+    }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
+    const doc = new PDFDocument({ margin: 40 });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => {
+      const pdf = Buffer.concat(chunks);
+      res.writeHead(200, {
+        "content-type": "application/pdf",
+        "content-disposition": `attachment; filename="${(workload.poNumber || workload.name).replace(/[^a-zA-Z0-9._-]/g, "") || "report"}.pdf"`
+      });
+      res.end(pdf);
+    });
+    doc.fontSize(16).text(workload.poNumber || workload.name);
+    doc.fontSize(10).text(`${workload.name} · ${new Date().toLocaleDateString()}`);
+    doc.moveDown();
+    const headers = isCompressor ? ["Core", "Part", "Qty", "Core chg", "Price", "Total"] : ["Core", "Part", "Qty", "Price", "Total"];
+    doc.fontSize(9).text(headers.join("   "));
+    doc.moveDown(0.2);
+    lines.forEach((item) => {
+      const cols = isCompressor
+        ? [item.coreNumber, item.partNumber, item.qty, "$" + item.coreCharge.toFixed(2), "$" + item.price.toFixed(2), "$" + item.line.toFixed(2)]
+        : [item.coreNumber, item.partNumber, item.qty, "$" + item.price.toFixed(2), "$" + item.line.toFixed(2)];
+      doc.text(cols.join("   "));
+    });
+    doc.moveDown();
+    doc.text(`Total units: ${units}`);
+    doc.text(`Box total: $${boxTotal.toFixed(2)}`);
+    doc.end();
     return;
   }
 
@@ -1000,7 +1067,7 @@ const server = http.createServer(async (req, res) => {
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
-      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
+      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report.pdf">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
     return;
   }
 
