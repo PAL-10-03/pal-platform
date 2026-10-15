@@ -1,4 +1,4 @@
-// PAL version 68 - Label order, no QR, sort by core, Excel total units
+// PAL version 69 - Excel line totals, units, box total with dollar signs
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -228,22 +228,28 @@ function workloadPage(session, db, workload) {
 function excelReport(workload, lines) {
   const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0 }];
   const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
-  const last = safeLines.length + 1;
-  const totalUnits = safeLines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0);
+  const money = (n) => n == null || n === "" || isNaN(Number(n)) ? "" : "$" + Number(n).toFixed(2);
+  let totalUnits = 0;
+  let boxTotal = 0;
+  const dataRows = safeLines.map((line) => {
+    const qty = Number(line.qty) || 0;
+    const price = Number(line.price) || 0;
+    const lineTotal = price * qty;
+    totalUnits += qty;
+    boxTotal += lineTotal;
+    return [line.coreNumber || "", line.partNumber || "", qty, money(price), money(lineTotal)];
+  });
   const rows = [
     ["Core #", "Part #", "QTY", "Price", "Total"],
-    ...safeLines.map((line) => [line.coreNumber, line.partNumber, Number(line.qty) || 0, line.price, null]),
+    ...dataRows,
     ["", "Total units", totalUnits, "", ""],
-    ["", "", "", "Box total", null]
+    ["", "", "", "Box total", money(boxTotal)]
   ];
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
     const r = index + 1;
     const cols = row.map((value, col) => {
       const ref = String.fromCharCode(65 + col) + r;
-      if (r > 1 && r <= last && col === 4) return `<c r="${ref}"><f>C${r}*D${r}</f></c>`;
-      if (r === last + 1 && col === 2) return `<c r="${ref}"><f>SUM(C2:C${last})</f></c>`;
-      if (r === last + 2 && col === 4) return `<c r="${ref}"><f>SUM(E2:E${last})</f></c>`;
       if (value == null || value === "") return "";
       if (typeof value === "number") return `<c r="${ref}"><v>${value}</v></c>`;
       return `<c r="${ref}" t="inlineStr"><is><t>${esc(value)}</t></is></c>`;
