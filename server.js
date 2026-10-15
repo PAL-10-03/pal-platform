@@ -1,4 +1,4 @@
-// PAL version 64 - Core database button and clear core/part columns
+// PAL version 66 - Core Reports, Core Pricing, and Excel units total
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -44,9 +44,9 @@ function seed() {
     ],
     modules: [
       { key: "core_processing", name: "Core Processing", description: "Identify and process used compressor cores." },
-      { key: "workloads", name: "Workloads", description: "Open and finish workloads." },
-      { key: "reports", name: "Reports", description: "Workload reports." },
-      { key: "pricing", name: "Pricing", description: "Active customer price list." },
+      { key: "workloads", name: "Core Workloads", description: "Open and finish workloads." },
+      { key: "reports", name: "Core Reports", description: "Workload reports." },
+      { key: "pricing", name: "Core Pricing", description: "Active customer price list." },
       { key: "database", name: "BAA core database", description: "Born Again Air core and part list." },
       { key: "approvals", name: "Approvals", description: "Review finished workloads." },
       { key: "invoice_processing", name: "Invoice Processing", description: "Process customer invoices." }
@@ -93,6 +93,12 @@ function load() {
   owner.passwordHash = hashPassword("pal-owner");
   owner.isPalAdmin = true;
   owner.status = "active";
+  const wl = db.modules.find(m => m.key === "workloads");
+  if (wl) wl.name = "Core Workloads";
+  const rp = db.modules.find(m => m.key === "reports");
+  if (rp) rp.name = "Core Reports";
+  const pr = db.modules.find(m => m.key === "pricing");
+  if (pr) pr.name = "Core Pricing";
   // Always ensure BAA core database module exists and is enabled
   if (!db.modules.find(m => m.key === "database")) {
     db.modules.push({ key: "database", name: "BAA core database", description: "Born Again Air core and part list." });
@@ -223,10 +229,11 @@ function excelReport(workload, lines) {
   const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0 }];
   const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
   const last = safeLines.length + 1;
+  const totalUnits = safeLines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0);
   const rows = [
     ["Part #", "Core #", "QTY", "Price", "Total"],
-    ...safeLines.map((line) => [line.partNumber, line.coreNumber, line.qty, line.price, null]),
-    ["", "Total units", null, "", ""],
+    ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty) || 0, line.price, null]),
+    ["", "Total units", totalUnits, "", ""],
     ["", "", "", "Box total", null]
   ];
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
