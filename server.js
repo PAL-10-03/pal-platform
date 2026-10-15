@@ -1,4 +1,4 @@
-// PAL version 72 - Two-button home: Cores and Compressors
+// PAL version 73 - Compressor processing, workloads, reports, database, pricing
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -349,8 +349,13 @@ function coreFrom(raw) {
 }
 
 function activePriceSheet(tenantId) {
-  const tenantFile = path.join(dataDir, "files", tenantId, "price-sheet.json");
-  const file = fs.existsSync(tenantFile) ? tenantFile : path.join(__dirname, "reference", "price-sheet.json");
+  const isCompressor = String(tenantId).endsWith("-compressor");
+  const realId = isCompressor ? tenantId.replace("-compressor", "") : tenantId;
+  const name = isCompressor ? "compressor-price-sheet.json" : "price-sheet.json";
+  const tenantFile = path.join(dataDir, "files", realId, name);
+  const fallback = path.join(__dirname, "reference", "price-sheet.json");
+  const file = fs.existsSync(tenantFile) ? tenantFile : (isCompressor ? null : fallback);
+  if (!file) return [];
   return JSON.parse(fs.readFileSync(file, "utf8"));
 }
 
@@ -636,12 +641,86 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname.startsWith("/compressors/")) {
-    const name = url.pathname.split("/").pop().replace(/^\w/, (c) => c.toUpperCase());
-    send(res, 200, page(name, `
-      ${header(session)}<h1>Compressor ${name}</h1>
-      <p class="sub">This section is ready. Matching and data will be added next.</p>
+  if (url.pathname === "/compressors/processing") {
+    send(res, 200, page("Compressor Processing", `
+      ${header(session)}<h1>Compressor Processing</h1>
+      <p class="sub">Look up one compressor by part number or core number.</p>
+      <form class="card" method="post" action="/core-lookup">
+        <label>Part or core number<input name="partNumber" placeholder="Type a part or core number" required></label>
+        <button type="submit">Look up</button>
+      </form>
       <p style="margin-top:18px"><a class="button ghost" href="/compressors">Back to Compressors</a></p>`));
+    return;
+  }
+
+  if (url.pathname === "/compressors/workloads") {
+    res.writeHead(302, { location: "/modules/workloads" });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/compressors/reports") {
+    res.writeHead(302, { location: "/modules/reports" });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/compressors/database") {
+    res.writeHead(302, { location: "/modules/database" });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/compressors/pricing") {
+    const prices = activePriceSheet(session.tenantId + "-compressor");
+    const rows = prices.slice(0, 40).map((row) => `<tr><td>${row.basePn || ""}</td><td>${row.coreBase || ""}</td><td>${row.description || ""}</td><td>$${Number(row.price || 0).toFixed(2)}</td></tr>`).join("");
+    send(res, 200, page("Compressor Pricing", `
+      ${header(session)}<h1>Compressor Pricing</h1>
+      <p class="sub">Upload a new compressor price sheet. The old one is deleted when the new one is saved.</p>
+      <div class="card">
+        <form id="comp-price-form">
+          <label>Excel file<input id="comp-sheet" type="file" accept=".xlsx,.xls" required></label>
+          <button type="submit">Upload and replace</button>
+          <p class="meta" id="comp-price-status"></p>
+        </form>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <table><tr><th>Part #</th><th>Core #</th><th>Description</th><th>Price</th></tr>${rows || `<tr><td colspan="4">No price sheet yet.</td></tr>`}</table>
+      </div>
+      <p style="margin-top:18px"><a class="button ghost" href="/compressors">Back to Compressors</a></p>
+      <script>
+        document.getElementById("comp-price-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const file = document.getElementById("comp-sheet").files[0];
+          const status = document.getElementById("comp-price-status");
+          status.textContent = "Saving...";
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+          const body = new URLSearchParams();
+          body.set("file", btoa(binary));
+          const response = await fetch("/compressors/pricing/upload", { method: "POST", body });
+          const result = await response.json();
+          status.textContent = result.message || "Saved.";
+          if (result.ok) setTimeout(() => location.reload(), 600);
+        });
+      </script>`));
+    return;
+  }
+
+  if (url.pathname === "/compressors/pricing/upload" && req.method === "POST") {
+    const body = await parseBody(req);
+    const b64 = body.get("file");
+    if (b64) {
+      const buffer = Buffer.from(b64, "base64");
+      const prices = parsePriceWorkbook(buffer);
+      const dir = path.join(dataDir, "files", session.tenantId);
+      fs.mkdirSync(dir, { recursive: true });
+      const out = path.join(dir, "compressor-price-sheet.json");
+      if (fs.existsSync(out)) fs.unlinkSync(out);
+      fs.writeFileSync(out, JSON.stringify(prices));
+    }
+    send(res, 200, JSON.stringify({ ok: true, message: "Saved. Old sheet deleted." }), { "content-type": "application/json" });
     return;
   }
 
