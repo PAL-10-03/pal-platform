@@ -1,4 +1,4 @@
-// PAL version 63 - BAA core database always visible and updatable
+// PAL version 64 - Core database button and clear core/part columns
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -966,19 +966,24 @@ const server = http.createServer(async (req, res) => {
     const dbFile = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
     const file = fs.existsSync(dbFile) ? dbFile : path.join(__dirname, "reference", "born-again-air.json");
     const born = JSON.parse(fs.readFileSync(file, "utf8"));
-    const rows = born.slice(0, 100).map(r => `<tr><td>${r.reman || ""}</td><td>${(r.raw || "").replace(/</g,"<")}</td></tr>`).join("");
+    const rows = born.slice(0, 100).map(r => {
+      const reman = r.reman || "";
+      const tokens = String(r.raw || "").split(/\s+/).filter(t => /^\d{5,}$/.test(t) && t !== reman);
+      const part = tokens.find(t => t.length >= 6) || tokens[0] || "";
+      return `<tr><td>${reman}</td><td>${part}</td><td>${(r.raw || "").replace(/</g,"<")}</td></tr>`;
+    }).join("");
     send(res, 200, page("BAA core database", `
       ${header(session)}<h1>BAA core database</h1>
       <p class="sub">Core and part numbers used for labels. Update or replace the file the same way as the price sheet.</p>
       <div class="card" style="margin-top:18px">
-        <p><a class="button" href="/database/file">Download current database</a></p>
+        <p><a class="button" href="/database/file">Core database</a></p>
         <form id="db-form">
           <label>Replace with new file<input id="dbfile" type="file" accept=".json,.xlsx,.pdf"></label>
           <button type="submit">Update database</button>
           <p class="meta" id="db-status"></p>
         </form>
-        <p class="meta">Showing first 100 rows. Core number is the first column.</p>
-        <table><tr><th>Core #</th><th>Raw line</th></tr>${rows}</table>
+        <p class="meta">Showing first 100 rows.</p>
+        <table><tr><th>Core #</th><th>Part #</th><th>Full line</th></tr>${rows}</table>
       </div>
       <script>
         document.getElementById("db-form").addEventListener("submit", async (event) => {
@@ -1027,9 +1032,19 @@ const server = http.createServer(async (req, res) => {
       send(res, 404, "Not available");
       return;
     }
-    const file = path.join(__dirname, "reference", "born-again-air.json");
-    res.writeHead(200, { "content-type": "application/json", "content-disposition": "attachment; filename=born-again-air.json" });
-    res.end(fs.readFileSync(file));
+    const dbFile = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
+    const file = fs.existsSync(dbFile) ? dbFile : path.join(__dirname, "reference", "born-again-air.json");
+    const born = JSON.parse(fs.readFileSync(file, "utf8"));
+    let csv = "Core #,Part #,Full line\n";
+    born.forEach(r => {
+      const reman = r.reman || "";
+      const tokens = String(r.raw || "").split(/\s+/).filter(t => /^\d{5,}$/.test(t) && t !== reman);
+      const part = tokens.find(t => t.length >= 6) || tokens[0] || "";
+      const line = String(r.raw || "").replace(/"/g, '""');
+      csv += `"${reman}","${part}","${line}"\n`;
+    });
+    res.writeHead(200, { "content-type": "text/csv", "content-disposition": "attachment; filename=Core-database.csv" });
+    res.end(csv);
     return;
   }
 
