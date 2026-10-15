@@ -1,4 +1,4 @@
-// PAL version 74 - Compressor core charge Yes/No and $65.50 rebuild
+// PAL version 75 - Compressor lookup HTML and core charge fix
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -191,10 +191,13 @@ function bornAgainOnly(session) {
 }
 
 function qtyRows(db, workloadId) {
+  const workload = db.workloads.find((item) => item.id === workloadId);
+  const isCompressor = workload && workload.type === "compressor";
   const rows = {};
   db.scans.filter((scan) => scan.workloadId === workloadId).forEach((scan) => {
-    const key = scan.confirmedPartNumber || scan.coreNumber || scan.id;
-    if (!rows[key]) rows[key] = { partNumber: scan.confirmedPartNumber || "", coreNumber: scan.coreNumber || "", qty: 0 };
+    const base = scan.confirmedPartNumber || scan.coreNumber || scan.id;
+    const key = isCompressor ? base + "|" + (scan.coreCharge ? "yes" : "no") : base;
+    if (!rows[key]) rows[key] = { partNumber: scan.confirmedPartNumber || "", coreNumber: scan.coreNumber || "", qty: 0, coreCharge: Boolean(scan.coreCharge) };
     rows[key].qty += 1;
   });
   return Object.values(rows);
@@ -648,7 +651,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, page("Compressor Processing", `
       ${header(session)}<h1>Compressor Processing</h1>
       <p class="sub">Look up one compressor by part number or core number.</p>
-      <form class="card" method="post" action="/core-lookup">
+      <form class="card" method="post" action="/compressors/lookup">
         <label>Part or core number<input name="partNumber" placeholder="Type a part or core number" required></label>
         <button type="submit">Look up</button>
       </form>
@@ -819,6 +822,22 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname === "/compressors/lookup" && req.method === "POST") {
+    const body = await parseBody(req);
+    const entered = String(body.get("partNumber") || "").trim();
+    const known = entered ? reference().numbers.get(entered) : null;
+    const partNumber = known ? (known.partNumber || "") : "";
+    const coreNumber = known ? (known.coreNumber || "") : "";
+    send(res, 200, page("Compressor Lookup", `
+      ${header(session)}<h1>Compressor Lookup</h1>
+      <div class="card" style="margin-top:18px">
+        <p>Part number: <strong>${partNumber || "—"}</strong></p>
+        <p>Core number: <strong>${coreNumber || "—"}</strong></p>
+      </div>
+      <p style="margin-top:18px"><a class="button ghost" href="/compressors/processing">Look up another</a></p>`));
+    return;
+  }
+
   if (url.pathname === "/core-lookup" && req.method === "POST") {
     if (!session.tenantId || !roleCanOpen(session.role, "core_processing")) {
       send(res, 403, "Not available");
@@ -900,13 +919,12 @@ const server = http.createServer(async (req, res) => {
     const isCompressor = workload.type === "compressor";
     const REBUILD = 65.5;
     const lines = qtyRows(db, workload.id).map((row) => {
-      const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
-      const coreNum = scan && scan.coreNumber ? scan.coreNumber : "";
+      const coreNum = row.coreNumber || "";
       const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
       const corePrice = priceRow ? Number(priceRow.price) : 0;
       let unitPrice, coreChargeAmt;
       if (isCompressor) {
-        coreChargeAmt = (scan && scan.coreCharge) ? corePrice : 0;
+        coreChargeAmt = row.coreCharge ? corePrice : 0;
         unitPrice = coreChargeAmt + REBUILD;
       } else {
         coreChargeAmt = 0;
@@ -943,13 +961,12 @@ const server = http.createServer(async (req, res) => {
     let units = 0;
     let boxTotal = 0;
     const ticketLines = qtyRows(db, workload.id).map((row) => {
-      const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
-      const coreNum = scan && scan.coreNumber ? scan.coreNumber : "";
+      const coreNum = row.coreNumber || "";
       const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
       const corePrice = priceRow ? Number(priceRow.price) : 0;
       let unitPrice, coreChargeAmt;
       if (isCompressor) {
-        coreChargeAmt = (scan && scan.coreCharge) ? corePrice : 0;
+        coreChargeAmt = row.coreCharge ? corePrice : 0;
         unitPrice = coreChargeAmt + REBUILD;
       } else {
         coreChargeAmt = 0;
@@ -965,7 +982,7 @@ const server = http.createServer(async (req, res) => {
       ${header(session)}<h1>${po}</h1>
       <p class="sub">${workload.name} · ${new Date().toLocaleDateString()} · SMP Oct Buy List</p>
       <div class="card" style="margin-top:18px">
-        <table><tr><th>Core #</th><th>Part #</th><th>QTY</th>${isCompressor ? `<th>Core charge</th>` : ""}<th>Price</th><th>Total</th></tr>${rows || `<tr><td colspan="${isCompressor ? 6 : 5}">No cores yet.</td></tr>`}</table>
+        <table style="font-size:13px;width:100%"><tr><th>Core</th><th>Part</th><th>Qty</th>${isCompressor ? `<th>Core chg</th>` : ""}<th>Price</th><th>Total</th></tr>${rows || `<tr><td colspan="${isCompressor ? 6 : 5}">No cores yet.</td></tr>`}</table>
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
@@ -1057,7 +1074,7 @@ const server = http.createServer(async (req, res) => {
     const known = reference().numbers.get(entered);
     const partNumber = known ? (known.partNumber || "") : "";
     const coreNumber = known ? (known.coreNumber || "") : "";
-    const coreCharge = workload.type === "compressor" ? (body.get("coreCharge") === "yes") : false;
+    const coreCharge = workload.type === "compressor" && String(body.get("coreCharge") || "").toLowerCase() === "yes";
     db.scans.push({
       id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
       confirmedPartNumber: partNumber, coreNumber: coreNumber, coreCharge,
