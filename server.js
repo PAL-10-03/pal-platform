@@ -1,4 +1,4 @@
-// PAL version 60 - manual part or core number only, no photos
+// PAL version 63 - BAA core database always visible and updatable
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -47,6 +47,7 @@ function seed() {
       { key: "workloads", name: "Workloads", description: "Open and finish workloads." },
       { key: "reports", name: "Reports", description: "Workload reports." },
       { key: "pricing", name: "Pricing", description: "Active customer price list." },
+      { key: "database", name: "BAA core database", description: "Born Again Air core and part list." },
       { key: "approvals", name: "Approvals", description: "Review finished workloads." },
       { key: "invoice_processing", name: "Invoice Processing", description: "Process customer invoices." }
     ],
@@ -55,6 +56,7 @@ function seed() {
       ["tenant_born_again_air", "workloads", true],
       ["tenant_born_again_air", "reports", true],
       ["tenant_born_again_air", "pricing", true],
+      ["tenant_born_again_air", "database", true],
       ["tenant_born_again_air", "approvals", false],
       ["tenant_born_again_air", "invoice_processing", false],
       ["tenant_northwind", "invoice_processing", true],
@@ -91,6 +93,16 @@ function load() {
   owner.passwordHash = hashPassword("pal-owner");
   owner.isPalAdmin = true;
   owner.status = "active";
+  // Always ensure BAA core database module exists and is enabled
+  if (!db.modules.find(m => m.key === "database")) {
+    db.modules.push({ key: "database", name: "BAA core database", description: "Born Again Air core and part list." });
+  }
+  const baaDb = db.tenantModules.find(tm => tm.tenantId === "tenant_born_again_air" && tm.moduleKey === "database");
+  if (!baaDb) {
+    db.tenantModules.push({ tenantId: "tenant_born_again_air", moduleKey: "database", enabled: true });
+  } else {
+    baaDb.enabled = true;
+  }
   fs.writeFileSync(dbPath, JSON.stringify(db, null, 2));
   return db;
 }
@@ -298,9 +310,13 @@ function loadReference() {
   const numbers = new Map();
   born.forEach((row) => {
     const reman = String(row.reman || "").trim();
-    if (reman) numbers.set(reman, { partNumber: reman, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || null });
-    String(row.raw || "").split(/\s+/).forEach((token) => {
-      if (/^\d{5,}$/.test(token) && !numbers.has(token)) numbers.set(token, { partNumber: reman || token, source: "Born Again Air Database.pdf", raw: row.raw, page: pages[reman] || pages[token] || null });
+    const raw = String(row.raw || "");
+    const tokens = raw.split(/\s+/).filter(t => /^\d{5,}$/.test(t));
+    const part = tokens.find(t => t !== reman && t.length >= 6) || tokens[0] || reman;
+    const entry = { partNumber: part, coreNumber: reman, source: "Born Again Air Database.pdf", raw: raw, page: pages[reman] || null };
+    if (reman) numbers.set(reman, entry);
+    tokens.forEach((token) => {
+      if (!numbers.has(token)) numbers.set(token, entry);
     });
   });
   Object.keys(pages).forEach((part) => {
@@ -370,7 +386,7 @@ function parsePriceWorkbook(buffer) {
 
 function roleCanOpen(role, moduleKey) {
   if (role === "manager") return true;
-  return moduleKey === "core_processing" || moduleKey === "workloads" || moduleKey === "reports" || moduleKey === "pricing";
+  return moduleKey === "core_processing" || moduleKey === "workloads" || moduleKey === "reports" || moduleKey === "pricing" || moduleKey === "database";
 }
 
 function send(res, status, html, headers = {}) {
@@ -631,7 +647,7 @@ const server = http.createServer(async (req, res) => {
     const entered = String(body.get("partNumber") || "").trim();
     const known = entered ? reference().numbers.get(entered) : null;
     const partNumber = known ? (known.partNumber || "") : "";
-    const coreNumber = known ? (coreFrom(known.raw) || "") : "";
+    const coreNumber = known ? (known.coreNumber || "") : "";
     const html = `<div class="card" style="margin-top:12px"><p>Part number: <strong>${partNumber || "—"}</strong></p><p>Core number: <strong>${coreNumber || "—"}</strong></p></div>`;
     send(res, 200, JSON.stringify({ html, partNumber, coreNumber }), { "content-type": "application/json" });
     return;
@@ -773,7 +789,7 @@ const server = http.createServer(async (req, res) => {
       const existing = db.scans.find((scan) => scan.workloadId === workload.id && scan.confirmedPartNumber === partNumber);
       db.scans.push({
         id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
-        confirmedPartNumber: partNumber, coreNumber: existing ? existing.coreNumber : (known ? coreFrom(known.raw) : ""),
+        confirmedPartNumber: known ? (known.partNumber || partNumber) : partNumber, coreNumber: existing ? existing.coreNumber : (known ? (known.coreNumber || "") : ""),
         photoCount: 0, photosDeleted: true, inDatabase: Boolean(known),
         wasCorrected: true, confirmedBy: session.userId, confirmedAt: new Date().toISOString()
       });
@@ -837,7 +853,7 @@ const server = http.createServer(async (req, res) => {
     }
     const known = reference().numbers.get(entered);
     const partNumber = known ? (known.partNumber || "") : "";
-    const coreNumber = known ? (coreFrom(known.raw) || "") : "";
+    const coreNumber = known ? (known.coreNumber || "") : "";
     db.scans.push({
       id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
       confirmedPartNumber: partNumber, coreNumber: coreNumber,
@@ -938,6 +954,82 @@ const server = http.createServer(async (req, res) => {
       ${header(session)}<h1>Reports</h1>
       <p class="sub">Boxes processed by this company, including employee boxes.</p>
       <div class="card" style="margin-top:18px"><table><tr><th>P.O.</th><th>Box</th><th>Cores</th><th>Ticket</th><th>Excel</th></tr>${rows || `<tr><td colspan="5">No boxes yet.</td></tr>`}</table></div>`));
+    return;
+  }
+
+
+  if (url.pathname === "/modules/database") {
+    if (!session.tenantId || session.role !== "manager" || session.tenantId !== "tenant_born_again_air") {
+      send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
+      return;
+    }
+    const dbFile = path.join(dataDir, "files", session.tenantId, "born-again-air.json");
+    const file = fs.existsSync(dbFile) ? dbFile : path.join(__dirname, "reference", "born-again-air.json");
+    const born = JSON.parse(fs.readFileSync(file, "utf8"));
+    const rows = born.slice(0, 100).map(r => `<tr><td>${r.reman || ""}</td><td>${(r.raw || "").replace(/</g,"<")}</td></tr>`).join("");
+    send(res, 200, page("BAA core database", `
+      ${header(session)}<h1>BAA core database</h1>
+      <p class="sub">Core and part numbers used for labels. Update or replace the file the same way as the price sheet.</p>
+      <div class="card" style="margin-top:18px">
+        <p><a class="button" href="/database/file">Download current database</a></p>
+        <form id="db-form">
+          <label>Replace with new file<input id="dbfile" type="file" accept=".json,.xlsx,.pdf"></label>
+          <button type="submit">Update database</button>
+          <p class="meta" id="db-status"></p>
+        </form>
+        <p class="meta">Showing first 100 rows. Core number is the first column.</p>
+        <table><tr><th>Core #</th><th>Raw line</th></tr>${rows}</table>
+      </div>
+      <script>
+        document.getElementById("db-form").addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const file = document.getElementById("dbfile").files[0];
+          const status = document.getElementById("db-status");
+          status.textContent = "Saving database...";
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          let binary = "";
+          for (let i = 0; i < bytes.length; i += 1) binary += String.fromCharCode(bytes[i]);
+          const body = new URLSearchParams();
+          body.set("name", file.name);
+          body.set("file", btoa(binary));
+          const response = await fetch("/database/upload", { method: "POST", body });
+          const result = await response.json();
+          status.textContent = result.message || "Saved.";
+          if (result.ok) setTimeout(() => location.reload(), 600);
+        });
+      </script>`));
+    return;
+  }
+
+  if (url.pathname === "/database/upload" && req.method === "POST") {
+    if (!session.tenantId || session.role !== "manager") {
+      send(res, 403, "Not available");
+      return;
+    }
+    const body = await parseBody(req);
+    const raw = body.get("file");
+    if (!raw) {
+      send(res, 200, JSON.stringify({ ok: false, message: "No file" }), { "content-type": "application/json" });
+      return;
+    }
+    const dir = path.join(dataDir, "files", session.tenantId);
+    fs.mkdirSync(dir, { recursive: true });
+    const buf = Buffer.from(raw, "base64");
+    fs.writeFileSync(path.join(dir, "born-again-air.json"), buf);
+    // Clear reference cache so new data is used
+    referenceCache = null;
+    send(res, 200, JSON.stringify({ ok: true, message: "Database updated." }), { "content-type": "application/json" });
+    return;
+  }
+
+  if (url.pathname === "/database/file") {
+    if (!session.tenantId || session.role !== "manager") {
+      send(res, 404, "Not available");
+      return;
+    }
+    const file = path.join(__dirname, "reference", "born-again-air.json");
+    res.writeHead(200, { "content-type": "application/json", "content-disposition": "attachment; filename=born-again-air.json" });
+    res.end(fs.readFileSync(file));
     return;
   }
 
