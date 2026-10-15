@@ -1,4 +1,4 @@
-// PAL version 70 - Clear box total under units
+// PAL version 71 - Box total on same row as total units
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -243,8 +243,7 @@ function excelReport(workload, lines) {
     ["Core #", "Part #", "QTY", "Price", "Total"],
     ...dataRows,
     ["", "", "", "", ""],
-    ["", "Total units", totalUnits, "", ""],
-    ["", "", "", "Box total", money(boxTotal)]
+    ["", "Total units", totalUnits, "Box total", money(boxTotal)]
   ];
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
