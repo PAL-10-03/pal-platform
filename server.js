@@ -1,4 +1,4 @@
-// PAL version 80 - Labels and reports download as PDF
+// PAL version 82 - Cores and compressors stay separate
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -232,7 +232,7 @@ function workloadPage(session, db, workload) {
     <div class="card" style="margin-top:12px">
       <table><tr><th>Part #</th><th>Core #</th><th>QTY</th><th>Label</th><th></th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
     </div>
-    <p style="margin-top:18px">${workload.status === "complete" && session.role === "manager" ? `<a class="button" href="/workloads/${workload.id}/ticket">Make P.O. ticket</a> <a class="button" href="/workloads/${workload.id}/report.pdf">Excel report</a>` : workload.status === "complete" ? `<p>Box complete. Quantities can still be edited.</p>` : `<form method="post" action="/workloads/${workload.id}/finish"><button type="submit">Finish box</button></form>`} <a class="button ghost" href="/modules/workloads">Back to workloads</a></p>
+    <p style="margin-top:18px">${workload.status === "complete" && session.role === "manager" ? `<a class="button" href="/workloads/${workload.id}/ticket">Make P.O. ticket</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a>` : workload.status === "complete" ? `<p>Box complete. Quantities can still be edited.</p>` : `<form method="post" action="/workloads/${workload.id}/finish"><button type="submit">Finish box</button></form>`} <a class="button ghost" href="/modules/workloads">Back to workloads</a></p>
 `);
 }
 
@@ -814,7 +814,7 @@ const server = http.createServer(async (req, res) => {
       send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
       return;
     }
-    const workloads = db.workloads.filter((item) => item.tenantId === session.tenantId);
+    const workloads = db.workloads.filter((item) => item.tenantId === session.tenantId && item.type !== "compressor");
     const open = workloads.filter((item) => item.status !== "complete" && item.status !== "archived");
     const done = workloads.filter((item) => item.status === "complete");
     const list = open.map((item) => `<a class="card" href="/workloads/${item.id}"><strong>${item.name}</strong><br><span class="meta">${item.status} · ${db.scans.filter((scan) => scan.workloadId === item.id).length} cores</span></a>`).join("");
@@ -880,7 +880,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const id = crypto.randomUUID();
-    db.workloads.push({ id, tenantId: session.tenantId, name, status: "open", startedBy: session.userId, startedAt: new Date().toISOString() });
+    db.workloads.push({ id, tenantId: session.tenantId, name, type: "core", status: "open", startedBy: session.userId, startedAt: new Date().toISOString() });
     save(db);
     res.writeHead(302, { location: `/workloads/${id}` });
     res.end();
@@ -907,26 +907,19 @@ const server = http.createServer(async (req, res) => {
     }
     const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "fs-squares.json"), "utf8"));
     const square = squares.find((item) => item.partNumber === scan.confirmedPartNumber);
-    const doc = new PDFDocument({ size: [288, 216], margin: 12 });
-    const chunks = [];
-    doc.on("data", (chunk) => chunks.push(chunk));
-    doc.on("end", () => {
-      const pdf = Buffer.concat(chunks);
-      res.writeHead(200, {
-        "content-type": "application/pdf",
-        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`
-      });
-      res.end(pdf);
-    });
-    doc.fontSize(14).text("Core: " + (scan.coreNumber || "—"));
-    doc.fontSize(12).text("Part: " + (scan.confirmedPartNumber || "—"));
-    if (square) {
-      const imgPath = path.join(__dirname, "reference", "fs-parts", square.file);
-      if (fs.existsSync(imgPath)) {
-        try { doc.image(imgPath, { fit: [260, 120], align: "center" }); } catch (e) {}
-      }
-    }
-    doc.end();
+    const image = square ? `<img src="/reference/square/${square.file}" alt="Catalog" style="max-width:100%;height:auto">` : "";
+    send(res, 200, page("Label", `
+      <style>@media print { .noprint { display:none } }</style>
+      <div style="max-width:400px;margin:20px auto;padding:16px;border:1px solid #ccc;background:#fff">
+        <p style="font-size:20px;margin:0">Core: <strong>${scan.coreNumber || "—"}</strong></p>
+        <p style="font-size:16px;margin:8px 0">Part: <strong>${scan.confirmedPartNumber || "—"}</strong></p>
+        ${image}
+      </div>
+      <p class="noprint" style="margin-top:18px;text-align:center">
+        <button onclick="window.print()" style="padding:12px 24px;font-size:16px">Print</button>
+        <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
+      </p>
+      <p class="noprint" style="font-size:13px;color:#666;text-align:center;margin-top:12px">On iPhone: tap the share button (box with arrow up), scroll down, tap Print.</p>`));
     return;
   }
 
@@ -1067,7 +1060,7 @@ const server = http.createServer(async (req, res) => {
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
-      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report.pdf">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
+      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
     return;
   }
 
@@ -1306,8 +1299,8 @@ const server = http.createServer(async (req, res) => {
       send(res, 404, page("Not available", `<h1>Not available</h1><p>Employees do not open Reports.</p><a class="button" href="/dashboard">Back</a>`));
       return;
     }
-    const saved = (db.reports || []).filter((item) => item.tenantId === session.tenantId);
-    const live = db.workloads.filter((item) => item.tenantId === session.tenantId && item.status !== "open" && !saved.some((report) => report.id === item.id));
+    const saved = (db.reports || []).filter((item) => item.tenantId === session.tenantId && item.type !== "compressor");
+    const live = db.workloads.filter((item) => item.tenantId === session.tenantId && item.type !== "compressor" && item.status !== "open" && !saved.some((report) => report.id === item.id));
     const rows = saved.map((item) => `<tr><td>${item.poNumber || "Not ticketed"}</td><td>${item.name}</td><td>${item.lines.reduce((sum, line) => sum + line.qty, 0)}</td><td><a href="/workloads/${item.id}/ticket">P.O. ticket</a></td><td><a href="/workloads/${item.id}/report">Excel</a></td></tr>`).concat(live.map((item) => {
       const qty = db.scans.filter((scan) => scan.workloadId === item.id).length;
       return `<tr><td>${item.poNumber || "Not ticketed"}</td><td>${item.name}</td><td>${qty}</td><td><a href="/workloads/${item.id}/ticket">P.O. ticket</a></td><td><a href="/workloads/${item.id}/report">Excel</a></td></tr>`;
