@@ -1,4 +1,4 @@
-// PAL version 73 - Compressor processing, workloads, reports, database, pricing
+// PAL version 74 - Compressor core charge Yes/No and $65.50 rebuild
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -214,9 +214,10 @@ function workloadPage(session, db, workload) {
     <div class="card" style="margin-top:18px">
       <form method="post" action="/workloads/${workload.id}/confirm">
         <label>Core or part number<input name="partNumber" placeholder="Type a core or part number" required></label>
+        ${workload.type === "compressor" ? `<label>Core charge?<select name="coreCharge"><option value="no">No</option><option value="yes">Yes</option></select></label>` : ""}
         <button type="submit">Add</button>
       </form>
-      <p class="meta">Looks up the number in the database. If it is not there, the field is left blank.</p>
+      <p class="meta">${workload.type === "compressor" ? "Yes adds the core price from the October sheet plus $65.50. No is a flat $65.50." : "Looks up the number in the database. If it is not there, the field is left blank."}</p>
     </div>
     <div class="card" style="margin-top:12px">
       <table><tr><th>Part #</th><th>Core #</th><th>QTY</th><th>Label</th><th></th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
@@ -227,6 +228,7 @@ function workloadPage(session, db, workload) {
 
 function excelReport(workload, lines) {
   const safeLines = lines.length ? lines : [{ partNumber: "", coreNumber: "", qty: 0, price: 0 }];
+  const isCompressor = safeLines.some((line) => line.isCompressor);
   const esc = (value) => String(value).replace(/&/g, "&").replace(/</g, "<");
   const money = (n) => n == null || n === "" || isNaN(Number(n)) ? "" : "$" + Number(n).toFixed(2);
   let totalUnits = 0;
@@ -237,14 +239,15 @@ function excelReport(workload, lines) {
     const lineTotal = price * qty;
     totalUnits += qty;
     boxTotal += lineTotal;
+    if (isCompressor) {
+      return [line.coreNumber || "", line.partNumber || "", qty, money(line.coreCharge || 0), money(price), money(lineTotal)];
+    }
     return [line.coreNumber || "", line.partNumber || "", qty, money(price), money(lineTotal)];
   });
-  const rows = [
-    ["Core #", "Part #", "QTY", "Price", "Total"],
-    ...dataRows,
-    ["", "", "", "", ""],
-    ["", "Total units", totalUnits, "Box total", money(boxTotal)]
-  ];
+  const header = isCompressor ? ["Core #", "Part #", "QTY", "Core charge", "Price", "Total"] : ["Core #", "Part #", "QTY", "Price", "Total"];
+  const blank = isCompressor ? ["", "", "", "", "", ""] : ["", "", "", "", ""];
+  const totals = isCompressor ? ["", "Total units", totalUnits, "", "Box total", money(boxTotal)] : ["", "Total units", totalUnits, "Box total", money(boxTotal)];
+  const rows = [header, ...dataRows, blank, totals];
   const sheet = [`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`];
   rows.forEach((row, index) => {
     const r = index + 1;
@@ -654,14 +657,52 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/compressors/workloads") {
-    res.writeHead(302, { location: "/modules/workloads" });
+    const open = db.workloads.filter((item) => item.tenantId === session.tenantId && item.type === "compressor" && item.status !== "complete");
+    const done = db.workloads.filter((item) => item.tenantId === session.tenantId && item.type === "compressor" && item.status === "complete");
+    const openCards = open.map((item) => `<a class="card" href="/workloads/${item.id}"><strong>${item.name}</strong><br><span class="meta">${item.status}</span></a>`).join("");
+    const doneCards = done.map((item) => {
+      const managerLinks = session.role === "manager" ? `<p style="margin-top:8px"><a href="/workloads/${item.id}/ticket">P.O. ticket</a> · <a href="/workloads/${item.id}/report">Excel</a></p>` : "";
+      return `<div class="card"><a href="/workloads/${item.id}"><strong>${item.poNumber || item.name}</strong></a>${managerLinks}</div>`;
+    }).join("");
+    send(res, 200, page("Compressor Workloads", `
+      ${header(session)}<h1>Compressor Workloads</h1>
+      <form class="card" method="post" action="/compressors/workloads/new">
+        <label>Box name<input name="name" placeholder="Box name" required></label>
+        <button type="submit">New box</button>
+      </form>
+      <h2 style="margin-top:24px">Open</h2>
+      <div class="grid">${openCards || "<p class='meta'>None open.</p>"}</div>
+      <h2 style="margin-top:24px">Complete</h2>
+      <div class="grid">${doneCards || "<p class='meta'>None complete.</p>"}</div>
+      <p style="margin-top:18px"><a class="button ghost" href="/compressors">Back to Compressors</a></p>`));
+    return;
+  }
+
+  if (url.pathname === "/compressors/workloads/new" && req.method === "POST") {
+    const body = await parseBody(req);
+    const name = String(body.get("name") || "").trim();
+    if (name) {
+      db.workloads.push({
+        id: crypto.randomUUID(), tenantId: session.tenantId, name, type: "compressor",
+        status: "open", createdAt: new Date().toISOString()
+      });
+      save(db);
+    }
+    res.writeHead(302, { location: "/compressors/workloads" });
     res.end();
     return;
   }
 
   if (url.pathname === "/compressors/reports") {
-    res.writeHead(302, { location: "/modules/reports" });
-    res.end();
+    const done = db.workloads.filter((item) => item.tenantId === session.tenantId && item.type === "compressor" && item.status === "complete");
+    const cards = done.map((item) => {
+      const managerLinks = session.role === "manager" ? `<p style="margin-top:8px"><a href="/workloads/${item.id}/ticket">P.O. ticket</a> · <a href="/workloads/${item.id}/report">Excel</a></p>` : "";
+      return `<div class="card"><strong>${item.poNumber || item.name}</strong><br><span class="meta">${item.name}</span>${managerLinks}</div>`;
+    }).join("");
+    send(res, 200, page("Compressor Reports", `
+      ${header(session)}<h1>Compressor Reports</h1>
+      <div class="grid" style="margin-top:18px">${cards || "<p class='meta'>No complete boxes yet.</p>"}</div>
+      <p style="margin-top:18px"><a class="button ghost" href="/compressors">Back to Compressors</a></p>`));
     return;
   }
 
@@ -856,11 +897,22 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const prices = activePriceSheet(session.tenantId);
+    const isCompressor = workload.type === "compressor";
+    const REBUILD = 65.5;
     const lines = qtyRows(db, workload.id).map((row) => {
       const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
       const coreNum = scan && scan.coreNumber ? scan.coreNumber : "";
       const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
-      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: priceRow ? Number(priceRow.price) : "" };
+      const corePrice = priceRow ? Number(priceRow.price) : 0;
+      let unitPrice, coreChargeAmt;
+      if (isCompressor) {
+        coreChargeAmt = (scan && scan.coreCharge) ? corePrice : 0;
+        unitPrice = coreChargeAmt + REBUILD;
+      } else {
+        coreChargeAmt = 0;
+        unitPrice = corePrice;
+      }
+      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: unitPrice, coreCharge: coreChargeAmt, isCompressor };
     }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
     const file = excelReport(workload, lines);
     res.writeHead(200, {
@@ -879,6 +931,8 @@ const server = http.createServer(async (req, res) => {
       return;
     }
     const prices = activePriceSheet(session.tenantId);
+    const isCompressor = workload.type === "compressor";
+    const REBUILD = 65.5;
     if (!workload.poNumber) {
       const used = db.workloads.filter((item) => item.tenantId === session.tenantId && item.poNumber).map((item) => Number(String(item.poNumber).replace("PO-", "")));
       const next = (used.length ? Math.max(...used) : 0) + 1;
@@ -892,18 +946,26 @@ const server = http.createServer(async (req, res) => {
       const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
       const coreNum = scan && scan.coreNumber ? scan.coreNumber : "";
       const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
-      const price = priceRow ? Number(priceRow.price) : null;
-      const line = price == null ? 0 : price * row.qty;
+      const corePrice = priceRow ? Number(priceRow.price) : 0;
+      let unitPrice, coreChargeAmt;
+      if (isCompressor) {
+        coreChargeAmt = (scan && scan.coreCharge) ? corePrice : 0;
+        unitPrice = coreChargeAmt + REBUILD;
+      } else {
+        coreChargeAmt = 0;
+        unitPrice = corePrice;
+      }
+      const line = unitPrice * row.qty;
       units += row.qty;
       boxTotal += line;
-      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price, line };
+      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: unitPrice, coreCharge: coreChargeAmt, line };
     }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
-    const rows = ticketLines.map((item) => `<tr><td>${item.coreNumber}</td><td>${item.partNumber}</td><td>${item.qty}</td><td>${item.price == null ? "Not on price sheet" : "$" + item.price.toFixed(2)}</td><td>${item.price == null ? "" : "$" + item.line.toFixed(2)}</td></tr>`).join("");
+    const rows = ticketLines.map((item) => `<tr><td>${item.coreNumber}</td><td>${item.partNumber}</td><td>${item.qty}</td>${isCompressor ? `<td>$${item.coreCharge.toFixed(2)}</td>` : ""}<td>$${item.price.toFixed(2)}</td><td>$${item.line.toFixed(2)}</td></tr>`).join("");
     send(res, 200, page(po, `
       ${header(session)}<h1>${po}</h1>
       <p class="sub">${workload.name} · ${new Date().toLocaleDateString()} · SMP Oct Buy List</p>
       <div class="card" style="margin-top:18px">
-        <table><tr><th>Core #</th><th>Part #</th><th>QTY</th><th>Price</th><th>Total</th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
+        <table><tr><th>Core #</th><th>Part #</th><th>QTY</th>${isCompressor ? `<th>Core charge</th>` : ""}<th>Price</th><th>Total</th></tr>${rows || `<tr><td colspan="${isCompressor ? 6 : 5}">No cores yet.</td></tr>`}</table>
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
@@ -995,9 +1057,10 @@ const server = http.createServer(async (req, res) => {
     const known = reference().numbers.get(entered);
     const partNumber = known ? (known.partNumber || "") : "";
     const coreNumber = known ? (known.coreNumber || "") : "";
+    const coreCharge = workload.type === "compressor" ? (body.get("coreCharge") === "yes") : false;
     db.scans.push({
       id: crypto.randomUUID(), tenantId: session.tenantId, workloadId: workload.id,
-      confirmedPartNumber: partNumber, coreNumber: coreNumber,
+      confirmedPartNumber: partNumber, coreNumber: coreNumber, coreCharge,
       photoCount: 0, photosDeleted: true, inDatabase: Boolean(known),
       wasCorrected: true, confirmedBy: session.userId, confirmedAt: new Date().toISOString()
     });
