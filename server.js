@@ -1,8 +1,9 @@
-// PAL version 78 - Print page that auto-triggers print dialog
+// PAL version 79 - Print downloads a PDF
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const PDFDocument = require("pdfkit");
 
 const os = require("os");
 const PORT = process.env.PORT || 3000;
@@ -1032,14 +1033,34 @@ const server = http.createServer(async (req, res) => {
       boxTotal += line;
       return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: unitPrice, coreCharge: coreChargeAmt, line };
     }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
-    const rows = ticketLines.map((item) => `<tr><td>${item.coreNumber}</td><td>${item.partNumber}</td><td>${item.qty}</td>${isCompressor ? `<td>$${item.coreCharge.toFixed(2)}</td>` : ""}<td>$${item.price.toFixed(2)}</td><td>$${item.line.toFixed(2)}</td></tr>`).join("");
-    send(res, 200, page(workload.poNumber || "Print", `
-      <h1>${workload.poNumber || workload.name}</h1>
-      <p>${workload.name} · ${new Date().toLocaleDateString()}</p>
-      <table style="width:100%;border-collapse:collapse"><tr><th>Core</th><th>Part</th><th>Qty</th>${isCompressor ? `<th>Core chg</th>` : ""}<th>Price</th><th>Total</th></tr>${rows}</table>
-      <p>Total units: <strong>${units}</strong></p>
-      <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
-      <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); };</script>`));
+
+    const doc = new PDFDocument({ margin: 40 });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => {
+      const pdf = Buffer.concat(chunks);
+      res.writeHead(200, {
+        "content-type": "application/pdf",
+        "content-disposition": `attachment; filename="${(workload.poNumber || workload.name).replace(/[^a-zA-Z0-9._-]/g, "") || "ticket"}.pdf"`
+      });
+      res.end(pdf);
+    });
+    doc.fontSize(18).text(workload.poNumber || workload.name);
+    doc.fontSize(11).text(`${workload.name} · ${new Date().toLocaleDateString()}`);
+    doc.moveDown();
+    const headers = isCompressor ? ["Core", "Part", "Qty", "Core chg", "Price", "Total"] : ["Core", "Part", "Qty", "Price", "Total"];
+    doc.fontSize(10).text(headers.join("    "));
+    doc.moveDown(0.3);
+    ticketLines.forEach((item) => {
+      const cols = isCompressor
+        ? [item.coreNumber, item.partNumber, item.qty, "$" + item.coreCharge.toFixed(2), "$" + item.price.toFixed(2), "$" + item.line.toFixed(2)]
+        : [item.coreNumber, item.partNumber, item.qty, "$" + item.price.toFixed(2), "$" + item.line.toFixed(2)];
+      doc.text(cols.join("    "));
+    });
+    doc.moveDown();
+    doc.text(`Total units: ${units}`);
+    doc.text(`Box total: $${boxTotal.toFixed(2)}`);
+    doc.end();
     return;
   }
 
