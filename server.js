@@ -1,4 +1,4 @@
-// PAL version 66 - Core Reports, Core Pricing, and Excel units total
+// PAL version 68 - Label order, no QR, sort by core, Excel total units
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -231,8 +231,8 @@ function excelReport(workload, lines) {
   const last = safeLines.length + 1;
   const totalUnits = safeLines.reduce((sum, line) => sum + (Number(line.qty) || 0), 0);
   const rows = [
-    ["Part #", "Core #", "QTY", "Price", "Total"],
-    ...safeLines.map((line) => [line.partNumber, line.coreNumber, Number(line.qty) || 0, line.price, null]),
+    ["Core #", "Part #", "QTY", "Price", "Total"],
+    ...safeLines.map((line) => [line.coreNumber, line.partNumber, Number(line.qty) || 0, line.price, null]),
     ["", "Total units", totalUnits, "", ""],
     ["", "", "", "Box total", null]
   ];
@@ -393,7 +393,7 @@ function parsePriceWorkbook(buffer) {
 
 function roleCanOpen(role, moduleKey) {
   if (role === "manager") return true;
-  return moduleKey === "core_processing" || moduleKey === "workloads" || moduleKey === "reports" || moduleKey === "pricing" || moduleKey === "database";
+  return moduleKey === "core_processing" || moduleKey === "workloads";
 }
 
 function send(res, status, html, headers = {}) {
@@ -706,11 +706,9 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, page("Label", `
       ${header(session)}<h1>Core label</h1>
       <div class="card" style="max-width:420px">
-        <p>Part number: <strong>${scan.confirmedPartNumber || "—"}</strong></p>
         <p>Core number: <strong>${scan.coreNumber || "—"}</strong></p>
+        <p>Part number: <strong>${scan.confirmedPartNumber || "—"}</strong></p>
         ${image}
-        <img alt="QR code" src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(link)}">
-        <p class="meta">Scan opens this square, part number, and core number.</p>
       </div>
       <p style="margin-top:18px"><button type="button" onclick="window.print()">Print</button> <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a></p>
       ${ask}`));
@@ -727,9 +725,10 @@ const server = http.createServer(async (req, res) => {
     const prices = activePriceSheet(session.tenantId);
     const lines = qtyRows(db, workload.id).map((row) => {
       const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
-      const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber);
-      return { partNumber: row.partNumber, coreNumber: scan && scan.coreNumber ? scan.coreNumber : "", qty: row.qty, price: priceRow ? Number(priceRow.price) : "" };
-    });
+      const coreNum = scan && scan.coreNumber ? scan.coreNumber : "";
+      const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
+      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: priceRow ? Number(priceRow.price) : "" };
+    }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
     const file = excelReport(workload, lines);
     res.writeHead(200, {
       "content-type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -756,20 +755,22 @@ const server = http.createServer(async (req, res) => {
     const po = workload.poNumber;
     let units = 0;
     let boxTotal = 0;
-    const rows = qtyRows(db, workload.id).map((row) => {
+    const ticketLines = qtyRows(db, workload.id).map((row) => {
       const scan = db.scans.find((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber);
-      const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber);
+      const coreNum = scan && scan.coreNumber ? scan.coreNumber : "";
+      const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
       const price = priceRow ? Number(priceRow.price) : null;
       const line = price == null ? 0 : price * row.qty;
       units += row.qty;
       boxTotal += line;
-      return `<tr><td>${row.partNumber}</td><td>${scan && scan.coreNumber ? scan.coreNumber : ""}</td><td>${row.qty}</td><td>${price == null ? "Not on price sheet" : "$" + price.toFixed(2)}</td><td>${price == null ? "" : "$" + line.toFixed(2)}</td></tr>`;
-    }).join("");
+      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price, line };
+    }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
+    const rows = ticketLines.map((item) => `<tr><td>${item.coreNumber}</td><td>${item.partNumber}</td><td>${item.qty}</td><td>${item.price == null ? "Not on price sheet" : "$" + item.price.toFixed(2)}</td><td>${item.price == null ? "" : "$" + item.line.toFixed(2)}</td></tr>`).join("");
     send(res, 200, page(po, `
       ${header(session)}<h1>${po}</h1>
       <p class="sub">${workload.name} · ${new Date().toLocaleDateString()} · SMP Oct Buy List</p>
       <div class="card" style="margin-top:18px">
-        <table><tr><th>Part #</th><th>Core #</th><th>QTY</th><th>Price</th><th>Total</th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
+        <table><tr><th>Core #</th><th>Part #</th><th>QTY</th><th>Price</th><th>Total</th></tr>${rows || `<tr><td colspan="5">No cores yet.</td></tr>`}</table>
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
