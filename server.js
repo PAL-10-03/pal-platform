@@ -1,4 +1,4 @@
-// PAL version 76 - Price is $65.50, total adds core charge; open box directly
+// PAL version 77 - Employee compressor view limited; print styles
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -163,7 +163,13 @@ function page(title, body) {
     .error { background:#f8e8e2; color:#8a3418; padding:10px 12px; border-radius:10px; }
     table { width:100%; border-collapse:collapse; } th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
     img { width:auto; max-width:100%; height:auto; object-fit:contain; border-radius:10px; display:block; } figcaption { margin-top:8px; font-weight:700; }
-  </style></head><body><main>${body}</main></body></html>`;
+  
+@media print {
+  .top, .corner, button, a.button, form { display: none !important; }
+  body { background: white; }
+  .card { box-shadow: none; border: 1px solid #ccc; }
+}
+</style></head><body><main>${body}</main></body></html>`;
 }
 
 function parseBody(req) {
@@ -633,16 +639,19 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
-    const cards = `
-      <a class="card" href="/compressors/processing"><strong>Compressor Processing</strong><br><span class="meta">Look up one compressor.</span></a>
-      <a class="card" href="/compressors/workloads"><strong>Compressor Workloads</strong><br><span class="meta">Build and finish boxes.</span></a>
-      <a class="card" href="/compressors/reports"><strong>Compressor Reports</strong><br><span class="meta">View completed boxes.</span></a>
-      <a class="card" href="/compressors/pricing"><strong>Compressor Pricing</strong><br><span class="meta">Active price sheet.</span></a>
-      <a class="card" href="/compressors/database"><strong>Compressor Database</strong><br><span class="meta">Compressor list.</span></a>
-    `;
+    const allCards = [
+      { href: "/compressors/processing", name: "Compressor Processing", meta: "Look up one compressor.", roles: ["manager", "employee"] },
+      { href: "/compressors/workloads", name: "Compressor Workloads", meta: "Build and finish boxes.", roles: ["manager", "employee"] },
+      { href: "/compressors/reports", name: "Compressor Reports", meta: "View completed boxes.", roles: ["manager"] },
+      { href: "/compressors/pricing", name: "Compressor Pricing", meta: "Active price sheet.", roles: ["manager"] },
+      { href: "/compressors/database", name: "Compressor Database", meta: "Compressor list.", roles: ["manager"] }
+    ];
+    const cards = allCards.filter((card) => card.roles.includes(session.role))
+      .map((card) => `<a class="card" href="${card.href}"><strong>${card.name}</strong><br><span class="meta">${card.meta}</span></a>`)
+      .join("");
     send(res, 200, page("Compressors", `
       ${header(session)}<h1>Compressors</h1>
-      <p class="sub">Same layout as Cores. Data and matching will be added next.</p>
+      
       <div class="grid" style="margin-top:18px">${cards}</div>`));
     return;
   }
