@@ -1,4 +1,4 @@
-// PAL version 69 - Excel line totals, units, box total with dollar signs
+// PAL version 70 - Clear box total under units
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -242,6 +242,7 @@ function excelReport(workload, lines) {
   const rows = [
     ["Core #", "Part #", "QTY", "Price", "Total"],
     ...dataRows,
+    ["", "", "", "", ""],
     ["", "Total units", totalUnits, "", ""],
     ["", "", "", "Box total", money(boxTotal)]
   ];
