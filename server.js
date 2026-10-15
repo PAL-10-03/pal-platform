@@ -1,4 +1,4 @@
-// PAL version 71 - Box total on same row as total units
+// PAL version 72 - Two-button home: Cores and Compressors
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -585,15 +585,63 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
-    const cards = db.tenantModules.filter((item) => item.tenantId === session.tenantId && item.enabled && item.moduleKey !== "approvals" && roleCanOpen(session.role, item.moduleKey))
-      .map((item) => db.modules.find((mod) => mod.key === item.moduleKey))
-      .map((mod) => `<a class="card" href="/modules/${mod.key}"><strong>${mod.name}</strong><br><span class="meta">${mod.description}</span></a>`)
-      .join("");
     send(res, 200, page(session.tenantName, `
       <div class="top"><div>${brand()}<h1>${session.tenantName}</h1>
       <p class="sub">${session.name} · ${session.role}</p></div>
       <div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
+      <div class="grid" style="margin-top:28px">
+        <a class="card" href="/cores" style="font-size:22px;padding:28px"><strong>Cores</strong><br><span class="meta">Core processing, workloads, reports, and pricing</span></a>
+        <a class="card" href="/compressors" style="font-size:22px;padding:28px"><strong>Compressors</strong><br><span class="meta">Compressor processing, workloads, reports, and pricing</span></a>
+      </div>`));
+    return;
+  }
+
+  if (url.pathname === "/cores") {
+    if (!session.tenantId) {
+      res.writeHead(302, { location: "/login" });
+      res.end();
+      return;
+    }
+    const coreModules = [
+      { key: "core_processing", name: "Core Processing", desc: "Look up one core." },
+      { key: "workloads", name: "Core Workloads", desc: "Build and finish boxes." },
+      { key: "reports", name: "Core Reports", desc: "View completed boxes." },
+      { key: "pricing", name: "Core Pricing", desc: "Active price sheet." },
+      { key: "database", name: "BAA Core Database", desc: "Born Again Air core list." }
+    ].filter((mod) => roleCanOpen(session.role, mod.key));
+    const cards = coreModules.map((mod) => `<a class="card" href="/modules/${mod.key}"><strong>${mod.name}</strong><br><span class="meta">${mod.desc}</span></a>`).join("");
+    send(res, 200, page("Cores", `
+      ${header(session)}<h1>Cores</h1>
       <div class="grid" style="margin-top:18px">${cards}</div>`));
+    return;
+  }
+
+  if (url.pathname === "/compressors") {
+    if (!session.tenantId) {
+      res.writeHead(302, { location: "/login" });
+      res.end();
+      return;
+    }
+    const cards = `
+      <a class="card" href="/compressors/processing"><strong>Compressor Processing</strong><br><span class="meta">Look up one compressor.</span></a>
+      <a class="card" href="/compressors/workloads"><strong>Compressor Workloads</strong><br><span class="meta">Build and finish boxes.</span></a>
+      <a class="card" href="/compressors/reports"><strong>Compressor Reports</strong><br><span class="meta">View completed boxes.</span></a>
+      <a class="card" href="/compressors/pricing"><strong>Compressor Pricing</strong><br><span class="meta">Active price sheet.</span></a>
+      <a class="card" href="/compressors/database"><strong>Compressor Database</strong><br><span class="meta">Compressor list.</span></a>
+    `;
+    send(res, 200, page("Compressors", `
+      ${header(session)}<h1>Compressors</h1>
+      <p class="sub">Same layout as Cores. Data and matching will be added next.</p>
+      <div class="grid" style="margin-top:18px">${cards}</div>`));
+    return;
+  }
+
+  if (url.pathname.startsWith("/compressors/")) {
+    const name = url.pathname.split("/").pop().replace(/^\w/, (c) => c.toUpperCase());
+    send(res, 200, page(name, `
+      ${header(session)}<h1>Compressor ${name}</h1>
+      <p class="sub">This section is ready. Matching and data will be added next.</p>
+      <p style="margin-top:18px"><a class="button ghost" href="/compressors">Back to Compressors</a></p>`));
     return;
   }
 
