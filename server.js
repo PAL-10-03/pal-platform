@@ -1,4 +1,4 @@
-// PAL version 77 - Employee compressor view limited; print styles
+// PAL version 78 - Print page that auto-triggers print dialog
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -916,7 +916,7 @@ const server = http.createServer(async (req, res) => {
         <p>Part number: <strong>${scan.confirmedPartNumber || "—"}</strong></p>
         ${image}
       </div>
-      <p style="margin-top:18px"><button type="button" onclick="window.print()">Print</button> <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a></p>
+      <p style="margin-top:18px"><a class="button" href="javascript:window.print()">Print</a> <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a></p>
       ${ask}`));
     return;
   }
@@ -999,7 +999,47 @@ const server = http.createServer(async (req, res) => {
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
-      <p style="margin-top:18px"><button type="button" onclick="window.print()">Print</button> <a class="button" href="/workloads/${workload.id}/report">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
+      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
+    return;
+  }
+
+  const printMatch = url.pathname.match(/^\/workloads\/([^/]+)\/print$/);
+  if (printMatch) {
+    const workload = db.workloads.find((item) => item.id === printMatch[1] && item.tenantId === session.tenantId);
+    if (!workload || session.role !== "manager") {
+      send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
+      return;
+    }
+    const prices = activePriceSheet(session.tenantId);
+    const isCompressor = workload.type === "compressor";
+    const REBUILD = 65.5;
+    let units = 0;
+    let boxTotal = 0;
+    const ticketLines = qtyRows(db, workload.id).map((row) => {
+      const coreNum = row.coreNumber || "";
+      const priceRow = prices.find((item) => item.coreBase === row.partNumber || item.basePn === row.partNumber || item.coreBase === coreNum || item.basePn === coreNum);
+      const corePrice = priceRow ? Number(priceRow.price) : 0;
+      let unitPrice, coreChargeAmt;
+      if (isCompressor) {
+        coreChargeAmt = row.coreCharge ? corePrice : 0;
+        unitPrice = REBUILD;
+      } else {
+        coreChargeAmt = 0;
+        unitPrice = corePrice;
+      }
+      const line = (unitPrice + coreChargeAmt) * row.qty;
+      units += row.qty;
+      boxTotal += line;
+      return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: unitPrice, coreCharge: coreChargeAmt, line };
+    }).sort((a, b) => String(a.coreNumber).localeCompare(String(b.coreNumber), undefined, { numeric: true }));
+    const rows = ticketLines.map((item) => `<tr><td>${item.coreNumber}</td><td>${item.partNumber}</td><td>${item.qty}</td>${isCompressor ? `<td>$${item.coreCharge.toFixed(2)}</td>` : ""}<td>$${item.price.toFixed(2)}</td><td>$${item.line.toFixed(2)}</td></tr>`).join("");
+    send(res, 200, page(workload.poNumber || "Print", `
+      <h1>${workload.poNumber || workload.name}</h1>
+      <p>${workload.name} · ${new Date().toLocaleDateString()}</p>
+      <table style="width:100%;border-collapse:collapse"><tr><th>Core</th><th>Part</th><th>Qty</th>${isCompressor ? `<th>Core chg</th>` : ""}<th>Price</th><th>Total</th></tr>${rows}</table>
+      <p>Total units: <strong>${units}</strong></p>
+      <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
+      <script>window.onload = function() { setTimeout(function() { window.print(); }, 300); };</script>`));
     return;
   }
 
