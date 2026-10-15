@@ -1,4 +1,4 @@
-// PAL version 75 - Compressor lookup HTML and core charge fix
+// PAL version 76 - Price is $65.50, total adds core charge; open box directly
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -239,7 +239,7 @@ function excelReport(workload, lines) {
   const dataRows = safeLines.map((line) => {
     const qty = Number(line.qty) || 0;
     const price = Number(line.price) || 0;
-    const lineTotal = price * qty;
+    const lineTotal = (price + Number(line.coreCharge || 0)) * qty;
     totalUnits += qty;
     boxTotal += lineTotal;
     if (isCompressor) {
@@ -685,11 +685,15 @@ const server = http.createServer(async (req, res) => {
     const body = await parseBody(req);
     const name = String(body.get("name") || "").trim();
     if (name) {
+      const id = crypto.randomUUID();
       db.workloads.push({
-        id: crypto.randomUUID(), tenantId: session.tenantId, name, type: "compressor",
+        id, tenantId: session.tenantId, name, type: "compressor",
         status: "open", createdAt: new Date().toISOString()
       });
       save(db);
+      res.writeHead(302, { location: `/workloads/${id}` });
+      res.end();
+      return;
     }
     res.writeHead(302, { location: "/compressors/workloads" });
     res.end();
@@ -925,7 +929,7 @@ const server = http.createServer(async (req, res) => {
       let unitPrice, coreChargeAmt;
       if (isCompressor) {
         coreChargeAmt = row.coreCharge ? corePrice : 0;
-        unitPrice = coreChargeAmt + REBUILD;
+        unitPrice = REBUILD;
       } else {
         coreChargeAmt = 0;
         unitPrice = corePrice;
@@ -967,12 +971,12 @@ const server = http.createServer(async (req, res) => {
       let unitPrice, coreChargeAmt;
       if (isCompressor) {
         coreChargeAmt = row.coreCharge ? corePrice : 0;
-        unitPrice = coreChargeAmt + REBUILD;
+        unitPrice = REBUILD;
       } else {
         coreChargeAmt = 0;
         unitPrice = corePrice;
       }
-      const line = unitPrice * row.qty;
+      const line = (unitPrice + coreChargeAmt) * row.qty;
       units += row.qty;
       boxTotal += line;
       return { partNumber: row.partNumber, coreNumber: coreNum, qty: row.qty, price: unitPrice, coreCharge: coreChargeAmt, line };
