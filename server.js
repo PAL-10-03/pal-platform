@@ -1,4 +1,4 @@
-// PAL version 86 - Print label opens PDF in new tab
+// PAL version 88 - Print uses window.print and clear iPhone steps
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -916,18 +916,18 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <a href="/labels/${scan.id}/pdf" target="_blank" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border-radius:8px;text-decoration:none">Print</a>
+        <button onclick="window.print()" style="padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
         <button id="shareBtn" style="padding:12px 24px;font-size:16px;margin-left:8px">Share</button>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
+      </p>
+      <p class="noprint" style="font-size:14px;color:#333;text-align:center;margin-top:12px;padding:12px;background:#f5f5f5;border-radius:8px">
+        On iPhone: tap the share button at the bottom of Safari (the box with the arrow), scroll down, and tap Print.
       </p>
       <script>
         document.getElementById("shareBtn").onclick = async () => {
           if (navigator.share) {
-            try {
-              await navigator.share({ title: "Core label", text: "Core: ${scan.coreNumber || ""}\nPart: ${scan.confirmedPartNumber || ""}", url: location.href });
-            } catch (e) {}
-          } else {
-            alert("On iPhone, tap the share button at the bottom of Safari (box with arrow up), then choose Print or Mail.");
+            try { await navigator.share({ title: "Core label", text: "Core: ${scan.coreNumber || ""}
+Part: ${scan.confirmedPartNumber || ""}", url: location.href }); } catch (e) {}
           }
         };
       </script>`));
