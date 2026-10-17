@@ -1,4 +1,4 @@
-// PAL version 82 - Cores and compressors stay separate
+// PAL version 85 - Print label opens a PDF
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -916,10 +916,53 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <button onclick="window.print()" style="padding:12px 24px;font-size:16px">Print</button>
+        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border-radius:8px;text-decoration:none">Print</a>
+        <button id="shareBtn" style="padding:12px 24px;font-size:16px;margin-left:8px">Share</button>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>
-      <p class="noprint" style="font-size:13px;color:#666;text-align:center;margin-top:12px">On iPhone: tap the share button (box with arrow up), scroll down, tap Print.</p>`));
+      <script>
+        document.getElementById("shareBtn").onclick = async () => {
+          if (navigator.share) {
+            try {
+              await navigator.share({ title: "Core label", text: "Core: ${scan.coreNumber || ""}\nPart: ${scan.confirmedPartNumber || ""}", url: location.href });
+            } catch (e) {}
+          } else {
+            alert("On iPhone, tap the share button at the bottom of Safari (box with arrow up), then choose Print or Mail.");
+          }
+        };
+      </script>`));
+    return;
+  }
+
+  const labelPdfMatch = url.pathname.match(/^\/labels\/([^/]+)\/pdf$/);
+  if (labelPdfMatch) {
+    const scan = db.scans.find((item) => item.id === labelPdfMatch[1] && item.tenantId === session.tenantId);
+    if (!scan || !roleCanOpen(session.role, "workloads")) {
+      send(res, 404, page("Not available", `<h1>Not available</h1><a class="button" href="/dashboard">Back</a>`));
+      return;
+    }
+    const squares = JSON.parse(fs.readFileSync(path.join(__dirname, "reference", "fs-squares.json"), "utf8"));
+    const square = squares.find((item) => item.partNumber === scan.confirmedPartNumber);
+    const doc = new PDFDocument({ size: [288, 216], margin: 12 });
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => {
+      const pdf = Buffer.concat(chunks);
+      res.writeHead(200, {
+        "content-type": "application/pdf",
+        "content-disposition": `inline; filename="label-${scan.coreNumber || scan.id}.pdf"`
+      });
+      res.end(pdf);
+    });
+    doc.fontSize(16).text("Core: " + (scan.coreNumber || "—"));
+    doc.fontSize(14).text("Part: " + (scan.confirmedPartNumber || "—"));
+    if (square) {
+      const imgPath = path.join(__dirname, "reference", "fs-parts", square.file);
+      if (fs.existsSync(imgPath)) {
+        try { doc.image(imgPath, { fit: [260, 120], align: "center" }); } catch (e) {}
+      }
+    }
+    doc.end();
     return;
   }
 
@@ -1060,7 +1103,17 @@ const server = http.createServer(async (req, res) => {
         <p>Total units: <strong>${units}</strong></p>
         <p>Box total: <strong>$${boxTotal.toFixed(2)}</strong></p>
       </div>
-      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>`));
+      <p style="margin-top:18px"><a class="button" href="/workloads/${workload.id}/print">Print</a> <a class="button" href="/workloads/${workload.id}/report">Excel report</a> <button id="sharePO" style="padding:10px 16px;margin-left:8px">Share</button> <a class="button ghost" href="/modules/workloads">Complete boxes</a></p>
+      <script>
+        document.getElementById("sharePO").onclick = async () => {
+          if (navigator.share) {
+            try { await navigator.share({ title: "${workload.poNumber || workload.name}", text: "PO ticket and report", url: location.href }); } catch(e) {}
+          } else {
+            alert("On iPhone, tap the share button at the bottom of Safari to email or print.");
+          }
+        };
+      </script>
+      <p style="font-size:13px;color:#666">On iPhone: tap Share to email or print.</p>`));
     return;
   }
 
