@@ -1,4 +1,4 @@
-// PAL version 90 - Print downloads PDF on phone
+// PAL version 91 - Print is a direct PDF link
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -916,24 +916,9 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <button id="printLabel" style="padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
+        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px;text-decoration:none">Print</a>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
-      </p>
-      <script>
-        document.getElementById("printLabel").onclick = async () => {
-          const isPhone = /iPhone|iPad|Android/i.test(navigator.userAgent);
-          if (isPhone) {
-            const res = await fetch("/labels/${scan.id}/pdf");
-            const blob = await res.blob();
-            const a = document.createElement("a");
-            a.href = URL.createObjectURL(blob);
-            a.download = "label-${scan.coreNumber || scan.id}.pdf";
-            a.click();
-          } else {
-            window.print();
-          }
-        };
-      </script>`));
+      </p>`));
     return;
   }
 
