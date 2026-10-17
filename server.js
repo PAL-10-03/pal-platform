@@ -1,4 +1,4 @@
-// PAL version 85 - Print label opens a PDF
+// PAL version 86 - Print label opens PDF in new tab
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -916,7 +916,7 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border-radius:8px;text-decoration:none">Print</a>
+        <a href="/labels/${scan.id}/pdf" target="_blank" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border-radius:8px;text-decoration:none">Print</a>
         <button id="shareBtn" style="padding:12px 24px;font-size:16px;margin-left:8px">Share</button>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>
