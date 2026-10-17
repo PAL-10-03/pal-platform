@@ -1,4 +1,4 @@
-// PAL version 88 - Print uses window.print and clear iPhone steps
+// PAL version 89 - Print downloads PDF on phone, prints on desktop
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -916,18 +916,21 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <button onclick="window.print()" style="padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
-        <button id="shareBtn" style="padding:12px 24px;font-size:16px;margin-left:8px">Share</button>
+        <button id="printLabel" style="padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>
-      <p class="noprint" style="font-size:14px;color:#333;text-align:center;margin-top:12px;padding:12px;background:#f5f5f5;border-radius:8px">
-        On iPhone: tap the share button at the bottom of Safari (the box with the arrow), scroll down, and tap Print.
-      </p>
       <script>
-        document.getElementById("shareBtn").onclick = async () => {
-          if (navigator.share) {
-            try { await navigator.share({ title: "Core label", text: "Core: ${scan.coreNumber || ""}
-Part: ${scan.confirmedPartNumber || ""}", url: location.href }); } catch (e) {}
+        document.getElementById("printLabel").onclick = async () => {
+          const isPhone = /iPhone|iPad|Android/i.test(navigator.userAgent);
+          if (isPhone) {
+            const res = await fetch("/labels/${scan.id}/pdf");
+            const blob = await res.blob();
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = "label-${scan.coreNumber || scan.id}.pdf";
+            a.click();
+          } else {
+            window.print();
           }
         };
       </script>`));
