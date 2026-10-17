@@ -1,4 +1,4 @@
-// PAL version 91 - Print is a direct PDF link
+// PAL version 92 - Print downloads PDF to Files
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
@@ -938,7 +938,7 @@ const server = http.createServer(async (req, res) => {
       const pdf = Buffer.concat(chunks);
       res.writeHead(200, {
         "content-type": "application/pdf",
-        "content-disposition": `inline; filename="label-${scan.coreNumber || scan.id}.pdf"`
+        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`
       });
       res.end(pdf);
     });
