@@ -214,7 +214,7 @@ function workloadPage(session, db, workload) {
   const ref = bornAgainOnly(session) ? referenceData() : null;
   const rows = qtyRows(db, workload.id).map((row) => {
     const label = db.scans.filter((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber)
-      .map((scan) => `<a href="/labels/${scan.id}">Print label</a>`).join("<br>");
+      .map((scan) => `<a href="/labels/${scan.id}/pdf" target="_blank">Print label</a>`).join("<br>");
     return `<tr><td>${row.partNumber || ""}</td><td>${row.coreNumber || ""}</td><td>${row.qty}</td><td>${label}</td><td><form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="-1"><button type="submit">−</button></form> <form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="1"><button type="submit">+</button></form></td></tr>`;
   }).join("");
   return page(workload.name, `
@@ -938,7 +938,7 @@ const server = http.createServer(async (req, res) => {
       const pdf = Buffer.concat(chunks);
       res.writeHead(200, {
         "content-type": "application/pdf",
-        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`
+        "content-disposition": `inline; filename="label-${scan.coreNumber || scan.id}.pdf"`
       });
       res.end(pdf);
     });
