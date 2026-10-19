@@ -453,13 +453,27 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/login" && req.method === "GET") {
-    if (!clerkFrontend) {
+    if (!clerkPublishable || !clerkFrontend) {
       send(res, 200, page("Sign in", `<h1>Clerk is not set up yet.</h1><p>Add the Clerk keys on Render, then try again.</p>`));
       return;
     }
-    const returnUrl = encodeURIComponent((req.headers["x-forwarded-proto"] || "https") + "://" + (req.headers.host || "") + "/clerk-done");
-    res.writeHead(302, { location: clerkFrontend + "/sign-in?redirect_url=" + returnUrl });
-    res.end();
+    const body = `
+      <h1>Sign in</h1>
+      <p class="sub">Sign in with your email. You stay on this page.</p>
+      <div id="clerk-sign-in" style="margin-top:18px;min-height:420px;"></div>
+      <script
+        async
+        crossorigin="anonymous"
+        data-clerk-publishable-key="${clerkPublishable}"
+        src="${clerkFrontend}/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
+        onload="window.Clerk.load().then(function(){
+          window.Clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
+            afterSignInUrl: '/clerk-done',
+            afterSignUpUrl: '/clerk-done'
+          });
+        })"
+      ></script>`;
+    send(res, 200, page("Sign in", body));
     return;
   }
 
