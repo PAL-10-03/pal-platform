@@ -453,27 +453,18 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/login" && req.method === "GET") {
-    if (!clerkPublishable || !clerkFrontend) {
-      send(res, 200, page("Sign in", `<h1>Clerk is not set up yet.</h1><p>Add the Clerk keys on Render, then try again.</p>`));
-      return;
-    }
-    const body = `
+    send(res, 200, page("Sign in", `
       <h1>Sign in</h1>
-      <p class="sub">Sign in with your email. You stay on this page.</p>
-      <div id="clerk-sign-in" style="margin-top:18px;min-height:420px;"></div>
-      <script
-        async
-        crossorigin="anonymous"
-        data-clerk-publishable-key="${clerkPublishable}"
-        src="${clerkFrontend}/npm/@clerk/clerk-js@5/dist/clerk.browser.js"
-        onload="window.Clerk.load().then(function(){
-          window.Clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
-            afterSignInUrl: '/clerk-done',
-            afterSignUpUrl: '/clerk-done'
-          });
-        })"
-      ></script>`;
-    send(res, 200, page("Sign in", body));
+      <p class="sub">Company workspace.</p>
+      <form method="post" action="/login" class="card" style="margin-top:18px">
+        <label>Email<input name="email" type="email" required></label>
+        <label>Password<input name="password" type="password" required></label>
+        <button type="submit">Sign in</button>
+      </form>
+      <p class="meta" style="margin-top:18px">Prototype accounts:<br>
+      admin@pal.local / pal-admin<br>
+      manager@bornagainair.local / manager<br>
+      employee@bornagainair.local / employee</p>`));
     return;
   }
 
