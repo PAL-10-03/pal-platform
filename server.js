@@ -85,6 +85,11 @@ function load() {
   owner.passwordHash = hashPassword("pal-owner");
   owner.isPalAdmin = true;
   owner.status = "active";
+  // Remove Northwind test company
+  db.tenants = db.tenants.filter((t) => t.id !== "tenant_northwind");
+  db.users = db.users.filter((u) => u.id !== "user_northwind");
+  db.memberships = db.memberships.filter((m) => m.tenantId !== "tenant_northwind");
+  db.tenantModules = db.tenantModules.filter((tm) => tm.tenantId !== "tenant_northwind");
   const wl = db.modules.find(m => m.key === "workloads");
   if (wl) wl.name = "Core Workloads";
   const rp = db.modules.find(m => m.key === "reports");
@@ -567,6 +572,26 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.pathname.startsWith("/admin/private/") && url.pathname.endsWith("/upload") && req.method === "POST") {
+    if (!session.isPalAdmin) { send(res, 403, "Not available"); return; }
+    const tenantId = url.pathname.split("/")[3];
+    const tenant = db.tenants.find((item) => item.id === tenantId);
+    if (!tenant) { res.writeHead(302, { location: "/admin" }); res.end(); return; }
+    const body = await parseBody(req);
+    const file = body.get("file");
+    if (file && file.size) {
+      const id = crypto.randomBytes(8).toString("hex");
+      const ext = path.extname(file.name || "").toLowerCase() || ".bin";
+      const saved = path.join(dataDir, id + ext);
+      fs.writeFileSync(saved, file.buffer);
+      db.files.push({ id, tenantId, name: file.name || id + ext, path: saved, createdAt: new Date().toISOString() });
+      save(db);
+    }
+    res.writeHead(302, { location: "/admin/private/" + tenantId });
+    res.end();
+    return;
+  }
+
   if (url.pathname.startsWith("/admin/private/")) {
     if (!session.isPalAdmin) { res.writeHead(302, { location: "/dashboard" }); res.end(); return; }
     const tenantId = url.pathname.split("/").pop();
@@ -581,6 +606,14 @@ const server = http.createServer(async (req, res) => {
         <strong>Workloads</strong>
         <p class="meta">${workloads.length} total</p>
         <p class="meta">Automation and data export will go here.</p>
+      </div>
+      <div class="card" style="margin-top:18px">
+        <strong>Upload</strong>
+        <p class="meta">Upload a file for this company (price sheet, database, or other).</p>
+        <form method="post" action="/admin/private/${tenantId}/upload" enctype="multipart/form-data">
+          <input type="file" name="file" required>
+          <button type="submit" style="margin-top:10px">Upload</button>
+        </form>
       </div>`));
     return;
   }
