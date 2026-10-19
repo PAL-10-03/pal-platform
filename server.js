@@ -484,7 +484,7 @@ const server = http.createServer(async (req, res) => {
     });
     res.writeHead(302, {
       location: user.isPalAdmin ? "/admin" : "/dashboard",
-      "set-cookie": `pal_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=43200`
+      "set-cookie": `pal_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200`
     });
     res.end();
     return;
@@ -916,7 +916,24 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px;text-decoration:none">Print</a>
+        <button onclick="downloadLabel()" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
+        <script>
+        function downloadLabel() {
+          const core = "${scan.coreNumber || "—"}";
+          const part = "${scan.confirmedPartNumber || "—"}";
+          const content = "BT /F1 16 Tf 50 200 Td (Core: " + core + ") Tj 0 -30 Td (Part: " + part + ") Tj ET";
+          const pdf = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 288 216]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length " + content.length + ">>stream\n" + content + "\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000266 00000 n \n0000000360 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n445\n%%EOF";
+          const blob = new Blob([pdf], { type: "application/pdf" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = "label-" + (core || "label") + ".pdf";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+          URL.revokeObjectURL(url);
+        }
+        </script>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>`));
     return;
@@ -938,7 +955,7 @@ const server = http.createServer(async (req, res) => {
       const pdf = Buffer.concat(chunks);
       res.writeHead(200, {
         "content-type": "application/pdf",
-        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`, "Cache-Control": "no-store"
+        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`
       });
       res.end(pdf);
     });
