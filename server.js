@@ -326,7 +326,7 @@ function excelReport(workload, lines) {
 }
 
 function header(session) {
-  return `<div class="top"><div>${brand()}<p class="sub">${session.tenantName} · ${session.role}</p></div><div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>`;
+  return `<div class="top"><div>${brand()}<p class="sub">${session.tenantName} · ${session.role}</p></div><div class="corner"><a class="button ghost" href="/dashboard">Home</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>`;
 }
 
 function loadReference() {
