@@ -862,8 +862,13 @@ const server = http.createServer(async (req, res) => {
     const known = entered ? reference().numbers.get(entered) : null;
     const partNumber = known ? (known.partNumber || "") : "";
     const coreNumber = known ? (known.coreNumber || "") : "";
-    const html = `<div class="card" style="margin-top:12px"><p>Part number: <strong>${partNumber || "—"}</strong></p><p>Core number: <strong>${coreNumber || "—"}</strong></p></div>`;
-    send(res, 200, JSON.stringify({ html, partNumber, coreNumber }), { "content-type": "application/json" });
+    send(res, 200, page("Core Lookup", `
+      ${header(session)}<h1>Core Lookup</h1>
+      <div class="card" style="margin-top:18px">
+        <p>Part number: <strong>${partNumber || "—"}</strong></p>
+        <p>Core number: <strong>${coreNumber || "—"}</strong></p>
+      </div>
+      <p style="margin-top:18px"><a class="button ghost" href="/modules/core_processing">Look up another</a></p>`));
     return;
   }
 
