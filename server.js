@@ -938,7 +938,7 @@ const server = http.createServer(async (req, res) => {
       const pdf = Buffer.concat(chunks);
       res.writeHead(200, {
         "content-type": "application/pdf",
-        "content-disposition": `inline; filename="label-${scan.coreNumber || scan.id}.pdf"`
+        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`, "Cache-Control": "no-store"
       });
       res.end(pdf);
     });
