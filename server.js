@@ -29,19 +29,16 @@ function seed() {
   const now = new Date().toISOString();
   return {
     tenants: [
-      { id: "tenant_born_again_air", legalName: "Born Again Air", displayName: "Born Again Air", slug: "born-again-air", status: "active", createdAt: now },
-      { id: "tenant_northwind", legalName: "Northwind Test Company", displayName: "Northwind Test Company", slug: "northwind", status: "active", createdAt: now }
+      { id: "tenant_born_again_air", legalName: "Born Again Air", displayName: "Born Again Air", slug: "born-again-air", status: "active", createdAt: now }
     ],
     users: [
       { id: "user_admin", email: "admin@pal.local", name: "PAL Admin", passwordHash: hashPassword("pal-admin"), isPalAdmin: true, status: "active" },
       { id: "user_baa_manager", email: "manager@bornagainair.local", name: "BAA Manager", passwordHash: hashPassword("manager"), isPalAdmin: false, status: "active" },
-      { id: "user_baa_employee", email: "employee@bornagainair.local", name: "BAA Employee", passwordHash: hashPassword("employee"), isPalAdmin: false, status: "active" },
-      { id: "user_northwind", email: "manager@northwind.local", name: "Northwind Manager", passwordHash: hashPassword("manager"), isPalAdmin: false, status: "active" }
+      { id: "user_baa_employee", email: "employee@bornagainair.local", name: "BAA Employee", passwordHash: hashPassword("employee"), isPalAdmin: false, status: "active" }
     ],
     memberships: [
       { tenantId: "tenant_born_again_air", userId: "user_baa_manager", role: "manager" },
-      { tenantId: "tenant_born_again_air", userId: "user_baa_employee", role: "employee" },
-      { tenantId: "tenant_northwind", userId: "user_northwind", role: "manager" }
+      { tenantId: "tenant_born_again_air", userId: "user_baa_employee", role: "employee" }
     ],
     modules: [
       { key: "core_processing", name: "Core Processing", description: "Identify and process used compressor cores." },
@@ -59,13 +56,7 @@ function seed() {
       ["tenant_born_again_air", "pricing", true],
       ["tenant_born_again_air", "database", true],
       ["tenant_born_again_air", "approvals", false],
-      ["tenant_born_again_air", "invoice_processing", false],
-      ["tenant_northwind", "invoice_processing", true],
-      ["tenant_northwind", "reports", true],
-      ["tenant_northwind", "core_processing", false],
-      ["tenant_northwind", "workloads", false],
-      ["tenant_northwind", "pricing", false],
-      ["tenant_northwind", "approvals", false]
+      ["tenant_born_again_air", "invoice_processing", false]
     ].map(([tenantId, moduleKey, enabled]) => ({ tenantId, moduleKey, enabled })),
     audit: [],
     workloads: [],
@@ -541,15 +532,56 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
-    const rows = db.tenants.map((tenant) => {
-      const people = db.memberships.filter((item) => item.tenantId === tenant.id).map((item) => db.users.find((user) => user.id === item.userId)).filter(Boolean);
-      return people.map((user) => `<tr><td>${tenant.displayName}</td><td><form method="post" action="/admin/reset"><input type="hidden" name="userId" value="${user.id}"><input name="email" value="${user.email}" required><input name="password" type="password" placeholder="New password, blank keeps current"><label><input type="checkbox" onchange="this.form.password.type=this.checked?'text':'password'"> Show password</label><button type="submit">Save</button></form></td></tr>`).join("");
-    }).join("");
+    const list = db.tenants.map((tenant) => `
+      <div class="card">
+        <strong>${tenant.displayName}</strong><br>
+        <span class="meta">${tenant.legalName}</span>
+        <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+          <form method="post" action="/admin/enter"><input type="hidden" name="tenantId" value="${tenant.id}"><button type="submit">Open ${tenant.displayName} portal</button></form>
+          <a class="button ghost" href="/admin/private/${tenant.id}">${tenant.displayName} (PAL only)</a>
+        </div>
+      </div>`).join("");
     send(res, 200, page("PAL Admin", `
-      <div class="top"><div>${brand(false)}<h1>Master list</h1>
-      <p class="sub">${session.name}. Change a company username or password here.</p></div>
+      <div class="top"><div>${brand(false)}<h1>Tenants</h1>
+      <p class="sub">${session.name}. Companies on PAL.</p></div>
       <form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div>
-      <div class="card" style="margin-top:18px"><table><tr><th>Company</th><th>Username and password</th></tr>${rows}</table></div>`));
+      <div class="grid" style="margin-top:18px">${list || `<p class="meta">No companies yet.</p>`}</div>`));
+    return;
+  }
+
+  if (url.pathname === "/admin/enter" && req.method === "POST") {
+    if (!session.isPalAdmin) { send(res, 403, "Not available"); return; }
+    const body = await parseBody(req);
+    const tenant = db.tenants.find((item) => item.id === body.get("tenantId"));
+    if (!tenant) { res.writeHead(302, { location: "/admin" }); res.end(); return; }
+    const token = sign({
+      userId: session.userId,
+      name: session.name,
+      tenantId: tenant.id,
+      tenantName: tenant.displayName,
+      role: "owner",
+      isPalAdmin: true
+    });
+    res.writeHead(302, { location: "/dashboard", "set-cookie": cookie(token) });
+    res.end();
+    return;
+  }
+
+  if (url.pathname.startsWith("/admin/private/")) {
+    if (!session.isPalAdmin) { res.writeHead(302, { location: "/dashboard" }); res.end(); return; }
+    const tenantId = url.pathname.split("/").pop();
+    const tenant = db.tenants.find((item) => item.id === tenantId);
+    if (!tenant) { res.writeHead(302, { location: "/admin" }); res.end(); return; }
+    const workloads = db.workloads.filter((item) => item.tenantId === tenantId);
+    send(res, 200, page(`${tenant.displayName} Owner`, `
+      <div class="top"><div>${brand(false)}<h1>${tenant.displayName} (PAL only)</h1>
+      <p class="sub">Private view. This company never sees this page.</p></div>
+      <div class="corner"><a class="button ghost" href="/admin">Back to tenants</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
+      <div class="card" style="margin-top:18px">
+        <strong>Workloads</strong>
+        <p class="meta">${workloads.length} total</p>
+        <p class="meta">Automation and data export will go here.</p>
+      </div>`));
     return;
   }
 
