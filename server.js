@@ -12,7 +12,7 @@ const dbPath = path.join(dataDir, "pal.json");
 const secret = process.env.PAL_SESSION_SECRET || "pal-prototype-session-secret-change-me";
 const clerkPublishable = process.env.CLERK_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
 const clerkSecret = process.env.CLERK_SECRET_KEY || "";
-const clerkFrontend = "https://touching-cowbird-6790.clerk.accounts.dev";
+const clerkFrontend = "https://touching-cowbird-6790.accounts.dev";
 
 async function clerkUser(req) {
   if (!clerkSecret) return null;
