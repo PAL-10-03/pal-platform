@@ -218,7 +218,7 @@ function workloadPage(session, db, workload) {
     return `<tr><td>${row.partNumber || ""}</td><td>${row.coreNumber || ""}</td><td>${row.qty}</td><td>${label}</td><td><form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="-1"><button type="submit">−</button></form> <form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="1"><button type="submit">+</button></form></td></tr>`;
   }).join("");
   return page(workload.name, `
-    ${header(session)}<button class="no-print button" onclick="window.print()" style="font-size:18px;padding:12px 20px;margin-bottom:12px">Print</button><h1>${workload.name}</h1>
+    ${header(session)}<h1>${workload.name}</h1>
     ${workload.status === "complete" ? `<p><strong>Box complete.</strong> Quantities can still be edited.</p>` : ""}
     <p class="sub">${workload.status}</p>
     <div class="card" style="margin-top:18px">
@@ -484,7 +484,7 @@ const server = http.createServer(async (req, res) => {
     });
     res.writeHead(302, {
       location: user.isPalAdmin ? "/admin" : "/dashboard",
-      "set-cookie": `pal_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200`
+      "set-cookie": `pal_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=None; Secure; Max-Age=43200`
     });
     res.end();
     return;
@@ -916,7 +916,7 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <button onclick="window.print()" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
+        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px;text-decoration:none">Print</a>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>`));
     return;
@@ -938,7 +938,7 @@ const server = http.createServer(async (req, res) => {
       const pdf = Buffer.concat(chunks);
       res.writeHead(200, {
         "content-type": "application/pdf",
-        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`
+        "content-disposition": `attachment; filename="label-${scan.coreNumber || scan.id}.pdf"`, "Cache-Control": "no-store"
       });
       res.end(pdf);
     });
