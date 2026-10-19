@@ -326,7 +326,7 @@ function excelReport(workload, lines) {
 }
 
 function header(session) {
-  return `<div class="top"><div>${brand()}<p class="sub">${session.tenantName} · ${session.role}</p></div><div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>`;
+  return `<div class="top"><div>${brand()}<p class="sub">${session.tenantName} · ${session.role}</p></div><div class="corner"><a class="button ghost" href="/dashboard">Home</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>`;
 }
 
 function loadReference() {
@@ -916,23 +916,7 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <button onclick="shareLabel()" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px">Print</button>
-        <script>
-        async function shareLabel() {
-          const core = "${scan.coreNumber || "—"}";
-          const part = "${scan.confirmedPartNumber || "—"}";
-          const content = "BT /F1 16 Tf 50 200 Td (Core: " + core + ") Tj 0 -30 Td (Part: " + part + ") Tj ET";
-          const pdf = "%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Count 1/Kids[3 0 R]>>endobj\n3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 288 216]/Contents 4 0 R/Resources<</Font<</F1 5 0 R>>>>>>endobj\n4 0 obj<</Length " + content.length + ">>stream\n" + content + "\nendstream\nendobj\n5 0 obj<</Type/Font/Subtype/Type1/BaseFont/Helvetica>>endobj\nxref\n0 6\n0000000000 65535 f \n0000000009 00000 n \n0000000058 00000 n \n0000000115 00000 n \n0000000266 00000 n \n0000000360 00000 n \ntrailer<</Size 6/Root 1 0 R>>\nstartxref\n445\n%%EOF";
-          const blob = new Blob([pdf], { type: "application/pdf" });
-          const file = new File([blob], "label-" + (core || "label") + ".pdf", { type: "application/pdf" });
-          if (navigator.share && navigator.canShare && navigator.canShare({ files: [file] })) {
-            await navigator.share({ files: [file], title: "Label" });
-          } else {
-            const url = URL.createObjectURL(blob);
-            window.open(url, "_blank");
-          }
-        }
-        </script>
+        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px;text-decoration:none">Print</a>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>`));
     return;
@@ -1601,4 +1585,3 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`PAL Business Solutions is running at http://localhost:${PORT}`);
   if (ips.length) console.log(`On your phone, same Wi-Fi, open ${ips.join(" or ")}`);
 });
-// fresh start Sun Oct 18 16:13:49 UTC 2026
