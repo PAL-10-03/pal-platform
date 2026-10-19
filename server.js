@@ -214,7 +214,7 @@ function workloadPage(session, db, workload) {
   const ref = bornAgainOnly(session) ? referenceData() : null;
   const rows = qtyRows(db, workload.id).map((row) => {
     const label = db.scans.filter((item) => item.workloadId === workload.id && item.confirmedPartNumber === row.partNumber)
-      .map((scan) => `<a href="/labels/${scan.id}/pdf" target="_blank">Print label</a>`).join("<br>");
+      .map((scan) => `<a href="/labels/${scan.id}/pdf">Print label</a>`).join("<br>");
     return `<tr><td>${row.partNumber || ""}</td><td>${row.coreNumber || ""}</td><td>${row.qty}</td><td>${label}</td><td><form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="-1"><button type="submit">−</button></form> <form method="post" action="/workloads/${workload.id}/qty"><input type="hidden" name="partNumber" value="${row.partNumber}"><input type="hidden" name="change" value="1"><button type="submit">+</button></form></td></tr>`;
   }).join("");
   return page(workload.name, `
@@ -916,7 +916,7 @@ const server = http.createServer(async (req, res) => {
         ${image}
       </div>
       <p class="noprint" style="margin-top:18px;text-align:center">
-        <a href="/labels/${scan.id}/pdf" target="_blank" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px;text-decoration:none">Print</a>
+        <a href="/labels/${scan.id}/pdf" style="display:inline-block;padding:12px 24px;font-size:16px;background:#1a3c34;color:#fff;border:none;border-radius:8px;text-decoration:none">Print</a>
         <a class="button ghost" href="/workloads/${scan.workloadId}">Back to box</a>
       </p>`));
     return;
