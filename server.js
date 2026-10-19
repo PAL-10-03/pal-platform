@@ -10,6 +10,26 @@ const PORT = process.env.PORT || 3000;
 const dataDir = path.join(__dirname, "data");
 const dbPath = path.join(dataDir, "pal.json");
 const secret = process.env.PAL_SESSION_SECRET || "pal-prototype-session-secret-change-me";
+const clerkPublishable = process.env.CLERK_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
+const clerkSecret = process.env.CLERK_SECRET_KEY || "";
+const clerkFrontend = clerkPublishable ? "https://" + Buffer.from(clerkPublishable.split("_")[2] || "", "base64").toString().replace(/\$$/, "") : "";
+
+async function clerkUser(req) {
+  if (!clerkSecret) return null;
+  const raw = (req.headers.cookie || "").split(";").map(s => s.trim()).find(s => s.startsWith("__session="));
+  if (!raw) return null;
+  const token = decodeURIComponent(raw.slice("__session=".length));
+  try {
+    const r = await fetch("https://api.clerk.com/v1/sessions/verify", {
+      method: "POST",
+      headers: { Authorization: "Bearer " + clerkSecret, "Content-Type": "application/json" },
+      body: JSON.stringify({ token })
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data;
+  } catch { return null; }
+}
 
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
@@ -433,29 +453,36 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (url.pathname === "/login" && req.method === "GET") {
-    const error = url.searchParams.get("error") ? `<div class="error">Email or password did not match.</div>` : url.searchParams.get("changed") ? `<p>Password changed. Sign in with the new password.</p>` : "";
-    send(res, 200, page("Sign in", `
-      ${brand(false)}<h1>Sign in</h1>
-      <p class="sub">Company workspace. Your account opens only the company you belong to.</p>
-      <form class="card" method="post" action="/login">${error}
-        <label>Email<input name="email" type="email" required></label>
-        <label>Password<input id="password" name="password" type="password" required></label>
-        <label><input id="show-password" type="checkbox"> Show password</label>
-        <button type="submit">Sign in</button>
-        <a class="button ghost" href="/password">Change password</a>
-      </form>
-      <script>
-        document.getElementById("show-password").addEventListener("change", (event) => {
-          document.getElementById("password").type = event.target.checked ? "text" : "password";
-        });
-      </script>
-      <p class="meta">Prototype accounts. Change these before any real customer use.</p>
-      <ul>
-        <li>kevin@pal.local / pal-owner</li>
-        <li>manager@bornagainair.local / manager</li>
-        <li>employee@bornagainair.local / employee</li>
-        <li>manager@northwind.local / manager</li>
-      </ul>`));
+    if (!clerkFrontend) {
+      send(res, 200, page("Sign in", `<h1>Clerk is not set up yet.</h1><p>Add the Clerk keys on Render, then try again.</p>`));
+      return;
+    }
+    const returnUrl = encodeURIComponent((req.headers["x-forwarded-proto"] || "https") + "://" + (req.headers.host || "") + "/clerk-done");
+    res.writeHead(302, { location: clerkFrontend + "/sign-in?redirect_url=" + returnUrl });
+    res.end();
+    return;
+  }
+
+  if (url.pathname === "/clerk-done") {
+    const info = await clerkUser(req);
+    if (!info) {
+      res.writeHead(302, { location: "/login" });
+      res.end();
+      return;
+    }
+    const db = load();
+    const email = (info.email || info.identifier || "").toLowerCase();
+    let user = db.users.find(u => (u.email || "").toLowerCase() === email);
+    if (!user) {
+      user = { id: "user_" + Date.now(), email, name: email.split("@")[0], isPalAdmin: email === "kevin@pal.local" || email.endsWith("@pal.local"), status: "active" };
+      db.users.push(user);
+      save(db);
+    }
+    const membership = db.memberships.find(m => m.userId === user.id);
+    const tenant = membership ? db.tenants.find(t => t.id === membership.tenantId) : null;
+    const token = signSession({ userId: user.id, isPalAdmin: !!user.isPalAdmin, tenantId: tenant && tenant.id, tenantName: tenant && tenant.displayName, role: membership && membership.role, exp: Date.now() + 12 * 60 * 60 * 1000 });
+    res.writeHead(302, { location: user.isPalAdmin ? "/admin" : "/dashboard", "set-cookie": `pal_session=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=43200` });
+    res.end();
     return;
   }
 
