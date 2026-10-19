@@ -1,0 +1,194 @@
+{
+  "tenants": [
+    {
+      "id": "tenant_born_again_air",
+      "legalName": "Born Again Air",
+      "displayName": "Born Again Air",
+      "slug": "born-again-air",
+      "status": "active",
+      "createdAt": "2026-10-05T20:26:48.264Z"
+    },
+    {
+      "id": "tenant_northwind",
+      "legalName": "Northwind Test Company",
+      "displayName": "Northwind Test Company",
+      "slug": "northwind",
+      "status": "active",
+      "createdAt": "2026-10-05T20:26:48.264Z"
+    }
+  ],
+  "users": [
+    {
+      "id": "user_admin",
+      "email": "admin@pal.local",
+      "name": "PAL Admin",
+      "passwordHash": "1bc9aceade030311e3d817db03a8f898:99e02cc321ca1f5e4e50ba99fa199a7adb0590a3a6050974dd54a673e4458de6",
+      "isPalAdmin": true,
+      "status": "active"
+    },
+    {
+      "id": "user_baa_manager",
+      "email": "manager@bornagainair.local",
+      "name": "BAA Manager",
+      "passwordHash": "78db4f44398b0d4e37906e96a564f519:5283921c4735a818c7abe259e9cf7c9d212dbed76f28023f9ef7fd8ae2ced664",
+      "isPalAdmin": false,
+      "status": "active"
+    },
+    {
+      "id": "user_baa_employee",
+      "email": "employee@bornagainair.local",
+      "name": "BAA Employee",
+      "passwordHash": "3e58782e7ad16dc3e1cfc4b568c7ca26:eb568c5fc2a720874b7ff224834330c4cc735372f0ad75a1511d88a9ccc830dd",
+      "isPalAdmin": false,
+      "status": "active"
+    },
+    {
+      "id": "user_northwind",
+      "email": "manager@northwind.local",
+      "name": "Northwind Manager",
+      "passwordHash": "d68569f93f04e3f35cd8f794be50441c:28b35a18205abeabad425b41f1f3c98f6585261037c7c6f8e8f6d7571c0c8e5a",
+      "isPalAdmin": false,
+      "status": "active"
+    }
+  ],
+  "memberships": [
+    {
+      "tenantId": "tenant_born_again_air",
+      "userId": "user_baa_manager",
+      "role": "manager"
+    },
+    {
+      "tenantId": "tenant_born_again_air",
+      "userId": "user_baa_employee",
+      "role": "employee"
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "userId": "user_northwind",
+      "role": "manager"
+    }
+  ],
+  "modules": [
+    {
+      "key": "core_processing",
+      "name": "Core Processing",
+      "description": "Identify and process used compressor cores."
+    },
+    {
+      "key": "workloads",
+      "name": "Workloads",
+      "description": "Open and finish workloads."
+    },
+    {
+      "key": "reports",
+      "name": "Reports",
+      "description": "Workload reports."
+    },
+    {
+      "key": "pricing",
+      "name": "Pricing",
+      "description": "Active customer price list."
+    },
+    {
+      "key": "approvals",
+      "name": "Approvals",
+      "description": "Review finished workloads."
+    },
+    {
+      "key": "invoice_processing",
+      "name": "Invoice Processing",
+      "description": "Process customer invoices."
+    }
+  ],
+  "tenantModules": [
+    {
+      "tenantId": "tenant_born_again_air",
+      "moduleKey": "core_processing",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_born_again_air",
+      "moduleKey": "workloads",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_born_again_air",
+      "moduleKey": "reports",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_born_again_air",
+      "moduleKey": "pricing",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_born_again_air",
+      "moduleKey": "approvals",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_born_again_air",
+      "moduleKey": "invoice_processing",
+      "enabled": false
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "moduleKey": "invoice_processing",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "moduleKey": "reports",
+      "enabled": true
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "moduleKey": "core_processing",
+      "enabled": false
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "moduleKey": "workloads",
+      "enabled": false
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "moduleKey": "pricing",
+      "enabled": false
+    },
+    {
+      "tenantId": "tenant_northwind",
+      "moduleKey": "approvals",
+      "enabled": false
+    }
+  ],
+  "audit": [
+    {
+      "at": "2026-10-05T20:27:26.350Z",
+      "action": "login",
+      "userId": "user_baa_manager",
+      "tenantId": "tenant_born_again_air"
+    },
+    {
+      "at": "2026-10-05T20:27:31.399Z",
+      "action": "login",
+      "userId": "user_northwind",
+      "tenantId": "tenant_northwind"
+    },
+    {
+      "at": "2026-10-05T20:27:48.331Z",
+      "action": "login",
+      "userId": "user_baa_manager",
+      "tenantId": "tenant_born_again_air"
+    },
+    {
+      "at": "2026-10-06T13:55:01.173Z",
+      "action": "login",
+      "userId": "user_baa_manager",
+      "tenantId": "tenant_born_again_air"
+    }
+  ],
+  "workloads": [],
+  "scans": [],
+  "files": []
+}
