@@ -12,15 +12,7 @@ const dbPath = path.join(dataDir, "pal.json");
 const secret = process.env.PAL_SESSION_SECRET || "pal-prototype-session-secret-change-me";
 const clerkPublishable = process.env.CLERK_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || "";
 const clerkSecret = process.env.CLERK_SECRET_KEY || "";
-let clerkFrontend = "";
-try {
-  if (clerkPublishable.includes("dG91Y2hpbmctY293YmlyZC02Nzkw")) {
-    clerkFrontend = "https://touching-cowbird-6790.clerk.accounts.dev";
-  } else if (clerkPublishable) {
-    const part = clerkPublishable.split("_")[2] || "";
-    clerkFrontend = "https://" + Buffer.from(part, "base64").toString().replace(/\$$/, "");
-  }
-} catch {}
+const clerkFrontend = "https://touching-cowbird-6790.clerk.accounts.dev";
 
 async function clerkUser(req) {
   if (!clerkSecret) return null;
