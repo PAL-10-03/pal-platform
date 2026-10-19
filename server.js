@@ -326,7 +326,7 @@ function excelReport(workload, lines) {
 }
 
 function header(session) {
-  return `<div class="top"><div>${brand()}<p class="sub">${session.tenantName} · ${session.role}</p></div><div class="corner"><a class="button ghost" href="/dashboard">Home</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>`;
+  return `<div class="top"><div>${brand()}<p class="sub">${session.tenantName} · ${session.role}</p></div><div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>`;
 }
 
 function loadReference() {
@@ -606,7 +606,7 @@ const server = http.createServer(async (req, res) => {
     send(res, 200, page(session.tenantName, `
       <div class="top"><div>${brand()}<h1>${session.tenantName}</h1>
       <p class="sub">${session.name} · ${session.role}</p></div>
-      <div class="corner"><a class="button ghost" href="/dashboard">Home</a><a class="button ghost" href="/password">Password</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
+      <div class="corner"><a class="button ghost" href="/dashboard">Home</a><form method="post" action="/logout"><button class="ghost" type="submit">Sign out</button></form></div></div>
       <div class="grid" style="margin-top:28px">
         <a class="card" href="/cores" style="font-size:22px;padding:28px"><strong>Cores</strong><br><span class="meta">Core processing, workloads, reports, and pricing</span></a>
         <a class="card" href="/compressors" style="font-size:22px;padding:28px"><strong>Compressors</strong><br><span class="meta">Compressor processing, workloads, reports, and pricing</span></a>
