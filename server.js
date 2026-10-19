@@ -542,7 +542,6 @@ const server = http.createServer(async (req, res) => {
         <strong>${tenant.displayName}</strong><br>
         <span class="meta">${tenant.legalName}</span>
         <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-          <form method="post" action="/admin/enter"><input type="hidden" name="tenantId" value="${tenant.id}"><button type="submit">Open ${tenant.displayName} portal</button></form>
           <a class="button ghost" href="/admin/private/${tenant.id}">${tenant.displayName} (PAL only)</a>
         </div>
       </div>`).join("");
