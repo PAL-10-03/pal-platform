@@ -1,5 +1,9 @@
 <!DOCTYPE html>
-<html><body>
-<h1>PAL - <%= user.company %></h1>
-<a href="/compressors">Compressors</a> | <a href="/workloads">Workloads</a>
+<html><head><title>PAL</title><style>body{font-family:Arial;margin:20px;}a{margin-right:15px;}</style></head>
+<body>
+<h1>PAL Business Solutions</h1>
+<p>Logged in as <%= user.username %> (<%= user.company %>)</p>
+<a href="/cores">Cores</a>
+<a href="/compressors">Compressors</a>
+<a href="/logout">Sign Out</a>
 </body></html>
