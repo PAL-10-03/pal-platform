@@ -452,20 +452,19 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (url.pathname === "/login" && req.method === "GET") {
+    if (url.pathname === "/login" && req.method === "GET") {
     send(res, 200, page("Sign in", `
-      <h1>Sign in</h1>
-      <p class="sub">Company workspace.</p>
-      <form method="post" action="/login" class="card" style="margin-top:18px">
-        <label>Email<input name="email" type="email" required></label>
-        <label>Password<input name="password" type="password" required></label>
-        <button type="submit">Sign in</button>
-      </form>
-      <p class="meta" style="margin-top:18px">Prototype accounts:<br>
-      admin@pal.local / pal-admin<br>
-      manager@bornagainair.local / manager<br>
-      employee@bornagainair.local / employee</p>`));
+      <div id="sign-in"></div>
+      <script async crossorigin="anonymous" data-clerk-publishable-key="${clerkPublishable}" src="https://touching-cowbird-6790.accounts.dev/npm/@clerk/clerk-js@5/dist/clerk.browser.js"></script>
+      <script>
+        window.addEventListener('load', async () => {
+          await Clerk.load();
+          Clerk.mountSignIn(document.getElementById('sign-in'));
+        });
+      </script>
+    `));
     return;
+  }    return;
   }
 
   if (url.pathname === "/clerk-done") {
