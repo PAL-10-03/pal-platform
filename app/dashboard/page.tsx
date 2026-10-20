@@ -1,38 +1,25 @@
 import { redirect } from "next/navigation";
-import { logout } from "@/lib/actions";
-import { readSession } from "@/lib/auth";
-import { getDb, type TenantModule } from "@/lib/db";
+import { auth, currentUser } from "@clerk/nextjs/server";
 
-export default function DashboardPage() {
-  const session = readSession();
-  if (!session) redirect("/login");
-  if (session.isPalAdmin && !session.tenantId) redirect("/admin");
-  if (!session.tenantId) redirect("/login");
+export default async function DashboardPage() {
+  const { userId } = auth();
+  if (!userId) redirect("/login");
 
-  const modules = getDb().prepare(
-    `SELECT m.key, m.name, m.description, tm.enabled
-     FROM tenant_modules tm JOIN modules m ON m.id = tm.module_id
-     WHERE tm.tenant_id = ? AND tm.enabled = 1
-     ORDER BY m.name`
-  ).all(session.tenantId) as TenantModule[];
+  const user = await currentUser();
+  const name = user?.firstName || user?.emailAddresses[0]?.emailAddress || "there";
 
   return (
     <main className="shell">
       <div className="top">
-        <div>
-          <p className="mark">PAL Business Solutions</p>
-          <h1>{session.tenantName}</h1>
-          <p className="sub">{session.name} · {session.role}</p>
-        </div>
-        <form action={logout}><button className="ghost" type="submit">Sign out</button></form>
+        <p className="mark">PAL Business Solutions</p>
+        <h1>Welcome, {name}</h1>
+        <p className="sub">You are signed in.</p>
       </div>
       <div className="grid modules">
-        {modules.map((module) => (
-          <a className="card module" key={module.key} href={`/modules/${module.key}`}>
-            <strong>{module.name}</strong>
-            <span>{module.description}</span>
-          </a>
-        ))}
+        <a className="card" href="/modules">
+          <strong>Core Processing</strong>
+          <span>Open the modules</span>
+        </a>
       </div>
     </main>
   );
