@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head><title>Compressors</title></head>
+<body>
+<h1>Compressors</h1>
+<p>Company: <%= user.company %></p>
+<form id="matchForm" enctype="multipart/form-data">
+  <label>Core charge? 
+    <select name="coreCharge">
+      <option value="yes">Yes</option>
+      <option value="no">No</option>
+    </select>
+  </label><br>
+  Photos: <input type="file" name="photos" multiple accept="image/*"><br>
+  <button type="submit">Match</button>
+</form>
+<div id="result"></div>
+<script>
+document.getElementById('matchForm').onsubmit = async (e) => {
+  e.preventDefault();
+  const fd = new FormData(e.target);
+  const r = await fetch('/compressors/match', { method: 'POST', body: fd });
+  const data = await r.json();
+  document.getElementById('result').innerHTML = 
+    `Part: ${data.part}<br>Core: ${data.core}<br>Core Charge: ${data.coreCharge}<br>Price: ${data.price}`;
+};
+</script>
+<a href="/">Home</a> | <a href="/workloads">Workloads</a>
+</body>
+</html>
