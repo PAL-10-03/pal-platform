@@ -1,7 +1,11 @@
 import { redirect } from "next/navigation";
-import { readSession } from "@/lib/auth";
+import { auth } from "@clerk/nextjs/server";
 
 export default function HomePage() {
-  const session = readSession();
-  redirect(session ? (session.isPalAdmin ? "/admin" : "/dashboard") : "/login");
+  const { userId } = auth();
+  if (!userId) {
+    redirect("/login");
+  }
+  // For now, send everyone to dashboard. Admin check can be added later.
+  redirect("/dashboard");
 }
