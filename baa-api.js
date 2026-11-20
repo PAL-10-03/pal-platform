@@ -185,6 +185,24 @@ app.post('/api/baa/catalog/row',manager,json,async(req,res)=>{
  }catch(e){res.status(500).json({error:e.message});}
  finally{catalogMutation.busy=false;}
 });
+// Delete one exact part/core pair from the database; preserve all other records and prices.
+app.delete('/api/baa/catalog/row',manager,json,async(req,res)=>{
+ if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
+ catalogMutation.busy=true;
+ try{
+  const part=String(req.body?.part??'').trim(),core=String(req.body?.core??'').trim();
+  if(!/^\d{4,8}$/.test(part)||!/^\d{4,12}$/.test(core))return res.status(400).json({error:'Invalid part/core number'});
+  const [baseRows,manualRows]=await Promise.all([read('catalog',seedCatalog),read('catalog-manual',[])]);
+  const matches=r=>norm(r.part)===part&&norm(r.core)===core;
+  // A pair may exist in both sources; remove it from both so it cannot reappear.
+  const baseNext=baseRows.filter(r=>!matches(r)),manualNext=manualRows.filter(r=>!matches(r));
+  if(baseNext.length===baseRows.length&&manualNext.length===manualRows.length)return res.status(404).json({error:'Database entry not found'});
+  if(baseNext.length!==baseRows.length)await write('catalog',baseNext);
+  if(manualNext.length!==manualRows.length)await write('catalog-manual',manualNext);
+  res.json({ok:true});
+ }catch(e){res.status(500).json({error:e.message});}
+ finally{catalogMutation.busy=false;}
+});
 // All price-sheet uploads are manager-only. A and B can be seeded individually;
 // a new Current rotates Current -> A -> B and discards the previous B.
 app.post('/api/baa/prices/upload',manager,require('express').raw({type:['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/octet-stream'],limit:'12mb'}),async(req,res)=>{
