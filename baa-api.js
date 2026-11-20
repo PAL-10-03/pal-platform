@@ -12,9 +12,8 @@ async function readRemote(key){
  if(r.ok)return {found:true,value:await r.json()};
  if(r.status===404)return {found:false};
  // Supabase Storage can return HTTP 400 with an Object-not-found payload.
- // Only the missing box index is allowed to fall back to the empty-list default.
- // Other 400 responses (bad credentials, bucket errors, etc.) remain visible.
- if((key==='box-index'||key==='price-history'||key==='price-bundle')&&r.status===400){
+ // A missing optional object is not an authentication failure; never mask other 400 errors.
+ if(r.status===400){
   const body=await r.text();
   let detail={};try{detail=JSON.parse(body);}catch(_){}
   const message=String(detail.message||'').toLowerCase();
@@ -114,7 +113,40 @@ function priceForSheets(sheets,part,core){
 function lookup(rows,priceRows,q){const term=norm(q);if(!term)return {matches:[]};const matches=rows.filter(r=>norm(r.part)===term||norm(r.core)===term).slice(0,50);return {matches:matches.map(r=>({...r,...(Array.isArray(priceRows)?priceFor(priceRows,r.part,r.core):priceForSheets(priceRows,r.part,r.core))})),duplicate:matches.length>1};}
 function boxRows(b){return (b.items||[]).map(x=>({...x,extended:Number.isFinite(x.price)?Math.round(x.price*x.qty*100)/100:null}));}
 function summary(b){const rows=boxRows(b);return {...b,items:rows,totalQty:rows.reduce((a,x)=>a+x.qty,0),pricedTotal:rows.reduce((a,x)=>a+(x.extended||0),0),unpriced:rows.filter(x=>x.extended===null).length};}
-function parseCatalogText(text){const out=[];const seen=new Set();for(const line of text.split(/\r?\n/)){const m=line.trim().match(/^(\d{4,8})\s+(?:No New|\d{4,8})\s+(\d{4,12})(?:\s|$)/i);if(!m)continue;const k=m[1]+'|'+m[2];if(!seen.has(k)){seen.add(k);out.push({part:m[1],core:m[2],...(catalogModels[m[1]]?{model:catalogModels[m[1]]}:{})});}}return out;}
+function parseCatalogText(text){
+ const out=[],seen=new Set();
+ for(const line of text.split(/\r?\n/)){
+  const m=line.trim().match(/^(\d{4,8})\s+(?:No\s+New|\d{4,8})\s+(\d{4,12})(?:\s|$)/i);
+  if(!m)continue;
+  const key=m[1]+'|'+m[2];if(seen.has(key))continue;
+  seen.add(key);out.push({part:m[1],core:m[2],...(catalogModels[m[1]]?{model:catalogModels[m[1]]}:{})});
+ }
+ return out;
+}
+// pdf-parse's default text flattens table columns out of order. Reassemble each
+// physical PDF row by its text-item coordinates before parsing REMAN / NEW / CORE.
+async function parseCatalogPdf(buffer){
+ const pageLines=[];
+ const pagerender=async page=>{
+  const content=await page.getTextContent({normalizeWhitespace:true,disableCombineTextItems:false});
+  const rows=[];
+  for(const item of content.items){
+   const value=String(item.str||'').trim();if(!value)continue;
+   const x=item.transform[4],y=item.transform[5];
+   let row=rows.find(r=>Math.abs(r.y-y)<2.2);
+   if(!row){row={y,items:[]};rows.push(row);}
+   row.items.push({x,value});
+  }
+  rows.sort((a,b)=>b.y-a.y);
+  const text=rows.map(r=>r.items.sort((a,b)=>a.x-b.x).map(i=>i.value).join(' ')).join('\n');
+  pageLines.push(text);
+  return text;
+ };
+ const result=await pdfParse(buffer,{pagerender});
+ const reconstructed=parseCatalogText(pageLines.join('\n'));
+ const flattened=parseCatalogText(result.text||'');
+ return reconstructed.length>=flattened.length?reconstructed:flattened;
+}
 function parsePriceSheet(wb){const sh=wb.worksheets[0];if(!sh)throw Error('Workbook has no sheet');let hdr=0,part=0,core=0,price=0;for(let i=1;i<=Math.min(sh.rowCount,25);i++){const row=sh.getRow(i);const cells=row.values.map(v=>norm(typeof v==='object'?v?.text??v?.result??'':v));part=cells.indexOf('BASEPN');core=cells.indexOf('COREBASE');price=cells.indexOf('PRICE');if(part>0&&core>0&&price>0){hdr=i;break;}}if(!hdr)throw Error('Expected BASE PN, CORE BASE and PRICE columns');const rows=[];for(let i=hdr+1;i<=sh.rowCount;i++){const row=sh.getRow(i);const p=norm(row.getCell(part).value),c=norm(row.getCell(core).value);const val=row.getCell(price).value;const n=Number(typeof val==='object'?val?.result:val);if((p||c)&&Number.isFinite(n)&&val!==null&&val!=='')rows.push({basePart:p,coreBase:c,price:n,sourceRow:i});}return rows;}
 module.exports=function(app,auth){const json=require('express').json({limit:'1mb'});const manager=(req,res,next)=>{if(!auth.manager(req))return res.status(403).json({error:'Born Again Air manager access required'});next();};
 app.get('/api/baa/status',manager,async(req,res)=>{try{const [c,sheets,index]=await Promise.all([cat(),priceSheets(),read('box-index',[])]);res.json({catalog:c.length,prices:sheets.current.length,pricesA:sheets.a.length,pricesB:sheets.b.length,boxes:index.length,persistent:remote,warning:remote?null:'Local storage is temporary on Render. Configure Supabase Storage for persistence.'});}catch(e){res.status(500).json({error:e.message});}});
@@ -145,9 +177,9 @@ app.post('/api/baa/catalog/upload',manager,require('express').raw({type:['applic
  catalogMutation.busy=true;
  try{
   if(!Buffer.isBuffer(req.body)||req.body.subarray(0,4).toString()!=='%PDF')return res.status(400).json({error:'Upload a PDF file'});
-  const rows=parseCatalogText((await pdfParse(req.body)).text);
+  const rows=await parseCatalogPdf(req.body);
   const existing=await read('catalog',seedCatalog);
-  if(rows.length<100||existing.length>=100&&rows.length<Math.ceil(existing.length*.8))return res.status(422).json({error:'Only '+rows.length+' database records recognized. Upload rejected; existing database unchanged. Use Add Part Number for corrections.'});
+  if(rows.length<1000||existing.length>=100&&rows.length<Math.ceil(existing.length*.60))return res.status(422).json({error:'Only '+rows.length+' database records recognized. Upload rejected; existing database unchanged. Use Add Part Number for corrections.'});
   const backup='catalog-backup-'+Date.now()+'-'+require('crypto').randomBytes(3).toString('hex');
   await write(backup,existing);
   await write('catalog',rows);
