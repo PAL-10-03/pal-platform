@@ -1,0 +1,15 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {instructions}=require('./automation/baa-instructions');
+assert.match(instructions.ceo,/CEO DAILY CHECK-IN ADDENDUM/);
+assert.match(instructions.ceo,/MASTER ACCOUNTING RULE 001/);
+assert.match(instructions.bookkeeper,/MASTER ACCOUNTING RULE 001/);
+const fs=require('fs');
+const route=fs.readFileSync(require.resolve('./automation/routes'),'utf8');
+assert.match(route,/await checkin\.run\(tenant\)/);
+const daily=fs.readFileSync(require.resolve('./automation/daily-checkin'),'utf8');
+assert.match(daily,/subject:'Daily Check-in'/);
+assert.match(daily,/minutes<360/);
+assert.match(daily,/daily-checkin:\$\{day\}/);
+assert.match(daily,/QuickBooks financial balances and reconciliations: Not verified/);
+console.log('PASS: additive bot rule, exact subject, scheduler wiring, 6am Central gate, idempotent key, financial data disclaimer');

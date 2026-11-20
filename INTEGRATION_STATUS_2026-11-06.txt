@@ -1,0 +1,38 @@
+PAL Integration Release — 2026-11-06
+
+IMPLEMENTED IN THIS PACKAGE:
+- Gmail OAuth owner-only initiation endpoint: GET /api/owner/automation/gmail-connect
+  Returns a Google authorizationUrl. One-time consent must be completed by PAL owner.
+- Gmail OAuth callback: https://palbiz.app/gmail/callback
+- One-time hashed OAuth state stored in Supabase; encrypted Gmail refresh token
+  stored in Supabase; sender identity must match PAL_EMAIL_FROM.
+- Gmail API email sending using the stored refresh token, without Resend.
+- Existing 6 AM America/Chicago Daily Check-in, CEO Grok composition toggle,
+  recipient-specific customer + PAL owner copies, dispatch ledger.
+- Render cron entrypoint: node automation/cron-tick.js
+- Existing PAL app, Rule 001, Accounting Codes and QuickBooks code preserved.
+
+STILL REQUIRED BEFORE LIVE AUTOMATIC EMAIL:
+- Google Cloud OAuth consent screen, Gmail API enabled, OAuth web client with
+  redirect URI above. This is not a Google API key; no new email account.
+- Run PAL_GMAIL_OAUTH.sql in Supabase.
+- Configure GMAIL_CLIENT_ID, GMAIL_CLIENT_SECRET, PAL_EMAIL_FROM,
+  PAL_OWNER_REPORT_EMAIL, PAL_CUSTOMER_REPORT_RECIPIENTS_JSON,
+  PAL_CEO_EMAIL_ENABLED=true, PAL_EMAIL_PROVIDER=gmail,
+  PAL_CEO_GROK_COMPOSE=true and encryption key (reuse existing
+  QBO_TOKEN_ENCRYPTION_KEY if present; otherwise PAL_GMAIL_ENCRYPTION_KEY).
+- Owner must open authorizationUrl while signed into PAL's Google account.
+- Render cron service schedule */5 * * * * (UTC) running
+  node automation/cron-tick.js with PAL_SCHEDULER_TOKEN matching web service.
+- Verify xAI API and Supabase live; send one authorized email test.
+
+LIMITATIONS / DO NOT CLAIM LIVE:
+- Not yet deployed or tested with live Gmail, xAI, Supabase or Render cron.
+- Reader processing is gated by PAL_READER_EXECUTION=true.
+- Bookkeeper, Banker, Negotiator, Report, Sales job executors are NOT fully
+  implemented; their jobs remain held for safety. This release does not
+  claim to complete all seven autonomous roles.
+- Gmail API confirms provider acceptance, not recipient inbox delivery.
+- OAuth in Google Testing mode may have refresh token expiry; production
+  authorization must be configured appropriately.
+- QuickBooks is intentionally not connected; financial posting remains off.

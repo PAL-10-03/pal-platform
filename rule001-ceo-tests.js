@@ -1,0 +1,14 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {instructions}=require('./automation/baa-instructions');
+for(const role of ['reader','bookkeeper','banker','ceo','reporter'])assert.match(instructions[role],/MASTER ACCOUNTING RULE 001/);
+for(const role of ['sales','negotiator'])assert.doesNotMatch(instructions[role],/MASTER ACCOUNTING RULE 001/);
+assert.match(instructions.bookkeeper,/Never issue payments or refunds/);
+assert.match(instructions.banker,/never create or modify entries yourself/);
+const mail=require('./automation/ceo-email');
+assert.throws(()=>mail.configuration('other-tenant'),/Unknown tenant/);
+process.env.PAL_EMAIL_PROVIDER='resend';process.env.PAL_CEO_EMAIL_ENABLED='true';process.env.RESEND_API_KEY='fake';process.env.PAL_EMAIL_FROM='test@example.org';process.env.PAL_OWNER_REPORT_EMAIL='owner@example.org';process.env.PAL_CUSTOMER_REPORT_RECIPIENTS_JSON=JSON.stringify({'born-again-air':'baa@example.org','newstart':'newstart@example.org'});
+assert.equal(mail.configuration('born-again-air').name,'Born Again Air');
+assert.equal(mail.configuration('newstart').name,'Newstart');
+assert.notEqual(mail.configuration('newstart').customer,mail.configuration('born-again-air').customer);
+console.log('PASS: additive rules, preserved restrictions, tenant-scoped email configuration, invalid tenant rejection');

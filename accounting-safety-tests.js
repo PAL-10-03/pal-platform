@@ -1,0 +1,11 @@
+'use strict';
+const assert=require('node:assert/strict');
+const {reconcile}=require('./automation/reconciliation');
+const qbo=require('./automation/qbo-client');
+const s={account:'Checking',periodStart:'2026-11-01',periodEnd:'2026-11-30',beginningBalance:100,endingBalance:125,transactions:[{date:'2026-11-02',amount:25,reference:'A'}]};
+const result=reconcile(s,[{id:'q1',date:'2026-11-02',amount:25,reference:'A'}]);
+assert.equal(result.balanceAgrees,true);assert.equal(result.matchedCandidates.length,1);assert.equal(result.fullyReconciled,false);
+assert.equal(reconcile({...s,endingBalance:126},[]).balanceAgrees,false);
+assert.equal(reconcile(s,[{id:'a',date:'2026-11-02',amount:25},{id:'b',date:'2026-11-02',amount:25}]).ambiguous.length,1);
+assert.throws(()=>qbo.safeQuery('SomethingElse'));
+(async()=>{await assert.rejects(qbo.request('born-again-air','POST','/payment',{TotalAmt:1}),/posting disabled/);await assert.rejects(qbo.request('born-again-air','POST','/billpay',{TotalAmt:1}),/endpoint forbidden/);console.log('Accounting safety tests passed');})().catch(e=>{console.error(e);process.exitCode=1;});

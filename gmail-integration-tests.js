@@ -1,0 +1,16 @@
+'use strict';
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const gmail=require('./automation/gmail');
+const oauth=require('./automation/gmail-oauth');
+assert.equal(typeof oauth.begin,'function');
+assert.equal(typeof oauth.complete,'function');
+assert.equal(typeof oauth.refreshToken,'function');
+assert.equal(typeof gmail.send,'function');
+assert.match(fs.readFileSync('./automation/routes.js','utf8'),/gmail-connect/);
+assert.match(fs.readFileSync('./automation/routes.js','utf8'),/gmail\/callback/);
+assert.match(fs.readFileSync('./automation/cron-tick.js','utf8'),/PAL_SCHEDULER_TOKEN/);
+assert.match(fs.readFileSync('./PAL_GMAIL_OAUTH.sql','utf8'),/ENABLE ROW LEVEL SECURITY/g);
+assert.match(fs.readFileSync('./automation/gmail-oauth.js','utf8'),/aes-256-gcm/);
+assert.match(fs.readFileSync('./automation/gmail-oauth.js','utf8'),/gmail\.send/);
+console.log('PASS Gmail integration structural checks (live OAuth and delivery still require authorization)');

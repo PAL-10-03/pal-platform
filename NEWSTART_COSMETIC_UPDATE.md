@@ -1,0 +1,1 @@
+Newstart-only UI update. Existing BAA modules, BAA bots and accounting integrations are unchanged. Newstart menu spreadsheet import requires no additional SQL tables. Excel and CSV files must have Day, Meal, Recipe, Ingredient, Quantity, Unit headers. Review imported quantities before approval. All menu and shopping automation beyond import remains future work.
