@@ -64,21 +64,26 @@ async function baaShow(section){if(!baaRequireDecision())return;baaSection=secti
  const status=await api('/status');
  el.innerHTML=`<h2>Part / Core Database & Price Lists</h2><p>${status.catalog} part/core records · ${status.prices} current prices · ${status.pricesA} A prices · ${status.pricesB} B prices</p>${status.warning?`<p class="baa-warning">${esc(status.warning)}</p>`:''}
  <div class="baa-admin-four-row">
- <div class="baa-card baa-admin-panel"><h3>4S Part/Core Database</h3><input type="file" id="pdf-file" accept=".xlsx,.pdf,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/pdf"><div class="baa-admin-buttons"><button id="pdf-upload">Import Excel / PDF Database</button><button id="view-catalog">View Database</button></div></div>
+ <div class="baa-card baa-admin-panel"><h3>4S Part/Core Database</h3><input type="file" id="pdf-file" accept=".pdf,application/pdf"><div class="baa-admin-buttons"><button id="pdf-upload">Upload File</button><button id="view-catalog">View Database</button><button id="baa-restore-original">Restore Original Database</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Current Price List</h3><input type="file" id="price-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-upload">Upload Current</button><button id="view-prices">View Current</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Price List A</h3><input type="file" id="price-a-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-a-upload">Upload Price List A</button><button id="view-prices-a">View Price List A</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Price List B</h3><input type="file" id="price-b-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-b-upload">Upload Price List B</button><button id="view-prices-b">View Price List B</button></div></div>
  </div><p id="baa-msg"></p><div id="baa-data-view"></div>`;
  document.getElementById('view-catalog').onclick=()=>baaViewData('catalog');
+ document.getElementById('baa-restore-original').onclick=async()=>{
+  if(!confirm('Restore the 1,940 original database records bundled with PAL? This replaces the damaged imported catalog, but keeps manually added records and all pricing lists.'))return;
+  if(prompt('Type RESTORE ORIGINAL to confirm')!=='RESTORE ORIGINAL')return;
+  try{const result=await post('/catalog/restore-original',{confirm:'RESTORE ORIGINAL'});alert('Restored '+result.restored+' original records. Total available: '+result.count);baaShow('database');}catch(e){alert(e.message);}
+ };
  document.getElementById('view-prices').onclick=()=>baaViewData('prices');
  document.getElementById('view-prices-a').onclick=()=>baaViewData('prices','',0,'a');
  document.getElementById('view-prices-b').onclick=()=>baaViewData('prices','',0,'b');
  for(const [button,input,url,mime,label] of [
-  ['pdf-upload','pdf-file','/catalog/upload','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','4 Seasons database'],
+  ['pdf-upload','pdf-file','/catalog/upload','application/pdf','4 Seasons database'],
   ['price-upload','price-file','/prices/upload?sheet=current','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Current Price List (rotates A and B)'],
   ['price-a-upload','price-a-file','/prices/upload?sheet=a','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Price List A'],
   ['price-b-upload','price-b-file','/prices/upload?sheet=b','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','Price List B']]){
-  document.getElementById(button).onclick=async()=>{const f=document.getElementById(input).files[0];if(!f)return alert('Select a file');if(!confirm('Replace '+label+'?'))return;try{const r=await api(url,{method:'POST',headers:{'Content-Type':input==='pdf-file'?(f.name.toLowerCase().endsWith('.pdf')?'application/pdf':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'):mime},body:f});alert(`Imported ${r.count} rows${r.rotated?' and rotated the older price lists':''}`);baaShow(section);}catch(e){alert(e.message);}};
+  document.getElementById(button).onclick=async()=>{const f=document.getElementById(input).files[0];if(!f)return alert('Select a file');if(!confirm('Replace '+label+'?'))return;try{const r=await api(url,{method:'POST',headers:{'Content-Type':mime},body:f});alert(`Imported ${r.count} rows${r.rotated?' and rotated the older price lists':''}`);baaShow(section);}catch(e){alert(e.message);}};
  }
  return;
 }
@@ -201,12 +206,12 @@ async function baaViewData(kind,q='',offset=0,sheet='current'){
  try{
   const d=await api('/'+kind+'?q='+encodeURIComponent(q)+'&offset='+offset+'&sheet='+encodeURIComponent(sheet));
   const catalog=kind==='catalog';
-  host.innerHTML=`<div class="baa-card"><h3>${catalog?'Part / Core Database':'Price List '+(sheet==='current'?'Current':sheet.toUpperCase())} (${d.count} matching)</h3>${catalog?'<button type="button" id="baa-add-part-toggle">+ Add Part Number</button><form id="baa-add-part-form" style="display:none;margin:12px 0"><label>REMAN Part Number <input name="part" required inputmode="numeric" pattern="[0-9]{4,8}" placeholder="REMAN part number"></label> <label>Core Number <input name="core" required inputmode="numeric" pattern="[0-9]{4,12}" placeholder="Core number"></label> <button type="submit">Save Part</button> <button type="button" id="baa-add-part-cancel">Cancel</button></form>':''}<form id="baa-filter"><input name="q" placeholder="Search part or core number" value="${esc(q)}"><button>Search</button></form><div class="baa-tablewrap"><table class="baa-table"><thead><tr>${catalog?'<th>Part Number</th><th>Core Number</th>':'<th>BASE PN (Part)</th><th>CORE BASE (Core)</th><th>Price</th>'}</tr></thead><tbody>${d.rows.map(x=>`<tr><td>${esc(catalog?x.part:x.basePart)}</td><td>${esc(catalog?x.core:x.coreBase)}</td>${catalog?'':`<td>$${Number(x.price).toFixed(2)}</td>`}</tr>`).join('')}</tbody></table></div><div class="baa-actions"><button id="baa-prev" ${offset===0?'disabled':''}>Previous</button><span>Showing ${d.rows.length?offset+1:0}–${offset+d.rows.length} of ${d.count}</span><button id="baa-next" ${offset+100>=d.count?'disabled':''}>Next</button></div></div>`;
+  host.innerHTML=`<div class="baa-card"><h3>${catalog?'Part / Core Database':'Price List '+(sheet==='current'?'Current':sheet.toUpperCase())} (${d.count} matching)</h3>${catalog?'<button type="button" id="baa-add-part-toggle">+ Add Part Number</button><form id="baa-add-part-form" style="display:none;margin:12px 0"><label>REMAN Part Number <input name="part" required inputmode="numeric" pattern="[0-9]{4,8}"></label> <label>Core Number <input name="core" required inputmode="numeric" pattern="[0-9]{4,12}"></label> <button type="submit">Save Part</button> <button type="button" id="baa-add-part-cancel">Cancel</button></form>':''}<form id="baa-filter"><input name="q" placeholder="Search part or core number" value="${esc(q)}"><button>Search</button></form><div class="baa-tablewrap"><table class="baa-table"><thead><tr>${catalog?'<th>Part Number</th><th>Core Number</th>':'<th>BASE PN (Part)</th><th>CORE BASE (Core)</th><th>Price</th>'}</tr></thead><tbody>${d.rows.map(x=>`<tr><td>${esc(catalog?x.part:x.basePart)}</td><td>${esc(catalog?x.core:x.coreBase)}</td>${catalog?'':`<td>$${Number(x.price).toFixed(2)}</td>`}</tr>`).join('')}</tbody></table></div><div class="baa-actions"><button id="baa-prev" ${offset===0?'disabled':''}>Previous</button><span>Showing ${d.rows.length?offset+1:0}–${offset+d.rows.length} of ${d.count}</span><button id="baa-next" ${offset+100>=d.count?'disabled':''}>Next</button></div></div>`;
   if(catalog){
    const form=host.querySelector('#baa-add-part-form');
    host.querySelector('#baa-add-part-toggle').onclick=()=>{form.style.display='block';form.querySelector('[name=part]').focus();};
    host.querySelector('#baa-add-part-cancel').onclick=()=>{form.reset();form.style.display='none';};
-   form.onsubmit=async e=>{e.preventDefault();const data=new FormData(form);const btn=form.querySelector('[type=submit]');btn.disabled=true;try{await post('/catalog/row',{part:String(data.get('part')).trim(),core:String(data.get('core')).trim()});await baaViewData('catalog',String(data.get('part')).trim(),0,sheet);}catch(err){alert(err.message);btn.disabled=false;}};
+   form.onsubmit=async e=>{e.preventDefault();const values=new FormData(form),part=String(values.get('part')).trim(),core=String(values.get('core')).trim(),btn=form.querySelector('[type=submit]');btn.disabled=true;try{await post('/catalog/row',{part,core});await baaViewData('catalog',part,0,sheet);}catch(err){alert(err.message);btn.disabled=false;}};
   }
   host.querySelector('#baa-filter').onsubmit=e=>{e.preventDefault();baaViewData(kind,new FormData(e.target).get('q'),0,sheet);};
   host.querySelector('#baa-prev').onclick=()=>baaViewData(kind,q,Math.max(0,offset-100),sheet);

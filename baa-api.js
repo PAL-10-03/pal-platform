@@ -68,7 +68,13 @@ async function removeStoredBox(id){
   const f=path.join(base,'box-'+id+'.json');if(fs.existsSync(f))fs.unlinkSync(f);
  }
 }
-const cat=()=>read('catalog',seedCatalog);const prices=()=>read('prices',seedPrices);
+// Manually added records are stored independently so a future catalog import cannot erase them.
+async function cat(){
+ const [baseRows,manualRows]=await Promise.all([read('catalog',seedCatalog),read('catalog-manual',[])]);
+ const seen=new Set(baseRows.map(r=>norm(r.part)+'|'+norm(r.core)));
+ return baseRows.concat(manualRows.filter(r=>{const key=norm(r.part)+'|'+norm(r.core);if(seen.has(key))return false;seen.add(key);return true;}));
+}
+const prices=()=>read('prices',seedPrices);
 const priceHistory=()=>read('price-history',{a:[],b:[]});
 // One storage object is the committed snapshot. A failed write cannot half-rotate lists.
 // Existing prices.json and price-history.json are read as-is until the first upload.
@@ -109,42 +115,6 @@ function lookup(rows,priceRows,q){const term=norm(q);if(!term)return {matches:[]
 function boxRows(b){return (b.items||[]).map(x=>({...x,extended:Number.isFinite(x.price)?Math.round(x.price*x.qty*100)/100:null}));}
 function summary(b){const rows=boxRows(b);return {...b,items:rows,totalQty:rows.reduce((a,x)=>a+x.qty,0),pricedTotal:rows.reduce((a,x)=>a+(x.extended||0),0),unpriced:rows.filter(x=>x.extended===null).length};}
 function parseCatalogText(text){const out=[];const seen=new Set();for(const line of text.split(/\r?\n/)){const m=line.trim().match(/^(\d{4,8})\s+(?:No New|\d{4,8})\s+(\d{4,12})(?:\s|$)/i);if(!m)continue;const k=m[1]+'|'+m[2];if(!seen.has(k)){seen.add(k);out.push({part:m[1],core:m[2],...(catalogModels[m[1]]?{model:catalogModels[m[1]]}:{})});}}return out;}
-// Catalog workbook is identification data only. Never touch pricing datasets.
-function catalogCell(v){if(v&&typeof v==='object')v=v.text??v.result??v.richText?.map(x=>x.text).join('')??'';return String(v??'').trim();}
-function parseCatalogWorkbook(wb){
- const sh=wb.worksheets[0];if(!sh)throw Error('Workbook has no worksheet');
- let header=0,partCol=0,coreCol=0,modelCol=0;
- for(let i=1;i<=Math.min(sh.rowCount,30);i++){
-  const row=sh.getRow(i),values=row.values.map(v=>catalogCell(v).toUpperCase().replace(/[^A-Z0-9]/g,''));
-  partCol=values.findIndex(v=>['REMANPART','REMANPARTNUMBER','REMAN','PARTNUMBER','PART'].includes(v));
-  coreCol=values.findIndex(v=>['CORE','CORENUMBER'].includes(v));
-  modelCol=values.findIndex(v=>v==='MODEL');
-  if(partCol>0&&coreCol>0){header=i;break;}
- }
- if(!header)throw Error('Excel requires REMAN Part Number and Core Number columns');
- const out=[],seen=new Set();
- for(let i=header+1;i<=sh.rowCount;i++){
-  const row=sh.getRow(i),part=catalogCell(row.getCell(partCol).value),core=catalogCell(row.getCell(coreCol).value);
-  if(!part&&!core)continue;
-  if(!/^\d{4,8}$/.test(part)||!/^\d{4,12}$/.test(core))throw Error('Invalid REMAN or core number on Excel row '+i+'. Existing database unchanged.');
-  const key=part+'|'+core;
-  if(seen.has(key))continue;
-  seen.add(key);
-  const model=modelCol>0?catalogCell(row.getCell(modelCol).value):'';
-  out.push({part,core,...(model?{model}:catalogModels[part]?{model:catalogModels[part]}:{})});
- }
- return out;
-}
-const catalogWriteLock={busy:false};
-async function replaceCatalogSafely(rows){
- if(rows.length<100)throw Error('Only '+rows.length+' records recognized; expected a full database (at least 100). Existing database unchanged.');
- const previous=await cat();
- if(previous.length>=100&&rows.length<Math.ceil(previous.length*.8))throw Error('Import contains '+rows.length+' records vs '+previous.length+' existing records. Existing database unchanged.');
- const backup='catalog-backup-'+new Date().toISOString().replace(/[^0-9]/g,'')+'-'+require('crypto').randomBytes(3).toString('hex');
- await write(backup,previous);
- await write('catalog',rows);
- return {ok:true,count:rows.length,previousCount:previous.length,backup};
-}
 function parsePriceSheet(wb){const sh=wb.worksheets[0];if(!sh)throw Error('Workbook has no sheet');let hdr=0,part=0,core=0,price=0;for(let i=1;i<=Math.min(sh.rowCount,25);i++){const row=sh.getRow(i);const cells=row.values.map(v=>norm(typeof v==='object'?v?.text??v?.result??'':v));part=cells.indexOf('BASEPN');core=cells.indexOf('COREBASE');price=cells.indexOf('PRICE');if(part>0&&core>0&&price>0){hdr=i;break;}}if(!hdr)throw Error('Expected BASE PN, CORE BASE and PRICE columns');const rows=[];for(let i=hdr+1;i<=sh.rowCount;i++){const row=sh.getRow(i);const p=norm(row.getCell(part).value),c=norm(row.getCell(core).value);const val=row.getCell(price).value;const n=Number(typeof val==='object'?val?.result:val);if((p||c)&&Number.isFinite(n)&&val!==null&&val!=='')rows.push({basePart:p,coreBase:c,price:n,sourceRow:i});}return rows;}
 module.exports=function(app,auth){const json=require('express').json({limit:'1mb'});const manager=(req,res,next)=>{if(!auth.manager(req))return res.status(403).json({error:'Born Again Air manager access required'});next();};
 app.get('/api/baa/status',manager,async(req,res)=>{try{const [c,sheets,index]=await Promise.all([cat(),priceSheets(),read('box-index',[])]);res.json({catalog:c.length,prices:sheets.current.length,pricesA:sheets.a.length,pricesB:sheets.b.length,boxes:index.length,persistent:remote,warning:remote?null:'Local storage is temporary on Render. Configure Supabase Storage for persistence.'});}catch(e){res.status(500).json({error:e.message});}});
@@ -152,32 +122,51 @@ app.get('/api/baa/lookup',manager,async(req,res)=>{try{res.json(lookup(await cat
 app.get('/api/baa/catalog',manager,async(req,res)=>{try{const rows=await cat();res.json({count:rows.length,rows:rows.filter(x=>!req.query.q||norm(x.part).includes(norm(req.query.q))||norm(x.core).includes(norm(req.query.q))).slice(Math.max(0,Number(req.query.offset)||0),Math.max(0,Number(req.query.offset)||0)+100).map(x=>({...x,index:rows.indexOf(x)}))});}catch(e){res.status(500).json({error:e.message});}});
 app.get('/api/baa/prices',manager,async(req,res)=>{try{const sheet=String(req.query.sheet||'current').toLowerCase();if(!['current','a','b'].includes(sheet))return res.status(400).json({error:'Invalid price list'});const sheets=await priceSheets();const rows=sheets[sheet],q=norm(req.query.q);const filtered=rows.map((x,index)=>({...x,index})).filter(x=>!q||norm(x.basePart).includes(q)||norm(x.coreBase).includes(q));res.json({count:filtered.length,rows:filtered.slice(Math.max(0,Number(req.query.offset)||0),Math.max(0,Number(req.query.offset)||0)+100)});}catch(e){res.status(500).json({error:e.message});}});
 app.post('/api/baa/prices/row',manager,json,async(req,res)=>{try{const old=await priceSheets(),rows=old.current.slice(),i=Number(req.body.index),basePart=norm(req.body.basePart),coreBase=norm(req.body.coreBase),price=num(req.body.price);if(!basePart&&!coreBase)return res.status(400).json({error:'Part or core number required'});if(!Number.isFinite(price)||price<0)return res.status(400).json({error:'Valid price required'});if(basePart.length>60||coreBase.length>60)return res.sendStatus(400);if(Number.isInteger(i)&&i>=0&&i<rows.length)rows[i]={...rows[i],basePart,coreBase,price};else rows.push({basePart,coreBase,price});await write('price-bundle',{...old,current:rows});res.json({ok:true,count:rows.length});}catch(e){res.status(500).json({error:e.message});}});
-app.post('/api/baa/catalog/upload',manager,require('express').raw({type:['application/pdf','application/octet-stream','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'],limit:'15mb'}),async(req,res)=>{
- if(catalogWriteLock.busy)return res.status(409).json({error:'Another catalog update is in progress'});
- catalogWriteLock.busy=true;
+// Restore the exact 1,940-row catalog bundled in the November 10 application.
+// This is a deliberate manager action; it never touches manually added parts or price lists.
+app.post('/api/baa/catalog/restore-original',manager,json,async(req,res)=>{
+ if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
+ if(req.body?.confirm!=='RESTORE ORIGINAL')return res.status(400).json({error:'Restore confirmation required'});
+ catalogMutation.busy=true;
  try{
-  if(!Buffer.isBuffer(req.body))return res.status(400).json({error:'Upload an Excel (.xlsx) or PDF file'});
-  let rows;
-  if(req.body.subarray(0,4).toString()==='%PDF')rows=parseCatalogText((await pdfParse(req.body)).text);
-  else if(req.body.subarray(0,2).toString()==='PK'){const wb=new ExcelJS.Workbook();await wb.xlsx.load(req.body);rows=parseCatalogWorkbook(wb);}
-  else return res.status(400).json({error:'Upload a valid Excel (.xlsx) or PDF file'});
-  res.json(await replaceCatalogSafely(rows));
+  const existing=await read('catalog',seedCatalog);
+  const backup='catalog-backup-'+Date.now()+'-'+require('crypto').randomBytes(3).toString('hex');
+  await write(backup,existing);
+  await write('catalog',seedCatalog);
+  res.json({ok:true,count:(await cat()).length,restored:seedCatalog.length,backup});
+ }catch(e){res.status(500).json({error:e.message});}
+ finally{catalogMutation.busy=false;}
+});
+const catalogMutation={busy:false};
+// The legacy PDF parser can recognize only a handful of rows in some PDFs.
+// Reject incomplete imports before any destructive write.
+app.post('/api/baa/catalog/upload',manager,require('express').raw({type:['application/pdf','application/octet-stream'],limit:'15mb'}),async(req,res)=>{
+ if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
+ catalogMutation.busy=true;
+ try{
+  if(!Buffer.isBuffer(req.body)||req.body.subarray(0,4).toString()!=='%PDF')return res.status(400).json({error:'Upload a PDF file'});
+  const rows=parseCatalogText((await pdfParse(req.body)).text);
+  const existing=await read('catalog',seedCatalog);
+  if(rows.length<100||existing.length>=100&&rows.length<Math.ceil(existing.length*.8))return res.status(422).json({error:'Only '+rows.length+' database records recognized. Upload rejected; existing database unchanged. Use Add Part Number for corrections.'});
+  const backup='catalog-backup-'+Date.now()+'-'+require('crypto').randomBytes(3).toString('hex');
+  await write(backup,existing);
+  await write('catalog',rows);
+  res.json({ok:true,count:(await cat()).length,backup});
  }catch(e){res.status(422).json({error:e.message});}
- finally{catalogWriteLock.busy=false;}
+ finally{catalogMutation.busy=false;}
 });
 app.post('/api/baa/catalog/row',manager,json,async(req,res)=>{
- if(catalogWriteLock.busy)return res.status(409).json({error:'Another catalog update is in progress'});
- catalogWriteLock.busy=true;
+ if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
+ catalogMutation.busy=true;
  try{
-  const part=String(req.body.part??'').trim(),core=String(req.body.core??'').trim();
-  if(!/^\d{4,8}$/.test(part)||!/^\d{4,12}$/.test(core))return res.status(400).json({error:'Enter valid numeric REMAN part and core numbers'});
-  const rows=await cat();
-  if(rows.some(x=>norm(x.part)===norm(part)&&norm(x.core)===norm(core)))return res.status(409).json({error:'This part/core pair already exists'});
-  const updated=rows.concat({part,core,...(catalogModels[part]?{model:catalogModels[part]}:{})});
-  await write('catalog',updated);
-  res.json({ok:true,count:updated.length});
+  const part=String(req.body?.part??'').trim(),core=String(req.body?.core??'').trim();
+  if(!/^\d{4,8}$/.test(part)||!/^\d{4,12}$/.test(core))return res.status(400).json({error:'Enter a valid numeric REMAN part and core number'});
+  if((await cat()).some(r=>norm(r.part)===part&&norm(r.core)===core))return res.status(409).json({error:'This REMAN/core pair already exists'});
+  const manual=await read('catalog-manual',[]);
+  await write('catalog-manual',manual.concat({part,core,...(catalogModels[part]?{model:catalogModels[part]}:{})}));
+  res.json({ok:true,count:(await cat()).length});
  }catch(e){res.status(500).json({error:e.message});}
- finally{catalogWriteLock.busy=false;}
+ finally{catalogMutation.busy=false;}
 });
 // All price-sheet uploads are manager-only. A and B can be seeded individually;
 // a new Current rotates Current -> A -> B and discards the previous B.
