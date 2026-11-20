@@ -154,21 +154,6 @@ app.get('/api/baa/lookup',manager,async(req,res)=>{try{res.json(lookup(await cat
 app.get('/api/baa/catalog',manager,async(req,res)=>{try{const rows=await cat();res.json({count:rows.length,rows:rows.filter(x=>!req.query.q||norm(x.part).includes(norm(req.query.q))||norm(x.core).includes(norm(req.query.q))).slice(Math.max(0,Number(req.query.offset)||0),Math.max(0,Number(req.query.offset)||0)+100).map(x=>({...x,index:rows.indexOf(x)}))});}catch(e){res.status(500).json({error:e.message});}});
 app.get('/api/baa/prices',manager,async(req,res)=>{try{const sheet=String(req.query.sheet||'current').toLowerCase();if(!['current','a','b'].includes(sheet))return res.status(400).json({error:'Invalid price list'});const sheets=await priceSheets();const rows=sheets[sheet],q=norm(req.query.q);const filtered=rows.map((x,index)=>({...x,index})).filter(x=>!q||norm(x.basePart).includes(q)||norm(x.coreBase).includes(q));res.json({count:filtered.length,rows:filtered.slice(Math.max(0,Number(req.query.offset)||0),Math.max(0,Number(req.query.offset)||0)+100)});}catch(e){res.status(500).json({error:e.message});}});
 app.post('/api/baa/prices/row',manager,json,async(req,res)=>{try{const old=await priceSheets(),rows=old.current.slice(),i=Number(req.body.index),basePart=norm(req.body.basePart),coreBase=norm(req.body.coreBase),price=num(req.body.price);if(!basePart&&!coreBase)return res.status(400).json({error:'Part or core number required'});if(!Number.isFinite(price)||price<0)return res.status(400).json({error:'Valid price required'});if(basePart.length>60||coreBase.length>60)return res.sendStatus(400);if(Number.isInteger(i)&&i>=0&&i<rows.length)rows[i]={...rows[i],basePart,coreBase,price};else rows.push({basePart,coreBase,price});await write('price-bundle',{...old,current:rows});res.json({ok:true,count:rows.length});}catch(e){res.status(500).json({error:e.message});}});
-// Restore the exact 1,940-row catalog bundled in the November 10 application.
-// This is a deliberate manager action; it never touches manually added parts or price lists.
-app.post('/api/baa/catalog/restore-original',manager,json,async(req,res)=>{
- if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
- if(req.body?.confirm!=='RESTORE ORIGINAL')return res.status(400).json({error:'Restore confirmation required'});
- catalogMutation.busy=true;
- try{
-  const existing=await read('catalog',seedCatalog);
-  const backup='catalog-backup-'+Date.now()+'-'+require('crypto').randomBytes(3).toString('hex');
-  await write(backup,existing);
-  await write('catalog',seedCatalog);
-  res.json({ok:true,count:(await cat()).length,restored:seedCatalog.length,backup});
- }catch(e){res.status(500).json({error:e.message});}
- finally{catalogMutation.busy=false;}
-});
 const catalogMutation={busy:false};
 // The legacy PDF parser can recognize only a handful of rows in some PDFs.
 // Reject incomplete imports before any destructive write.
@@ -258,6 +243,18 @@ app.patch('/api/baa/boxes/:id',manager,json,async(req,res)=>{try{if(!safeId(req.
 app.patch('/api/baa/boxes/:id/items/:item',manager,json,async(req,res)=>{try{if(!safeId(req.params.id))return res.sendStatus(400);const b=await read('box-'+req.params.id,null);if(!b)return res.sendStatus(404);if(b.status!=='draft')return res.status(409).json({error:'Reopen finished box before editing'});const x=b.items.find(x=>x.id===req.params.item);if(!x)return res.sendStatus(404);const qty=Number(req.body.qty);if(!Number.isSafeInteger(qty)||qty<1||qty>100000)return res.status(400).json({error:'Invalid quantity'});b.audit=b.audit||[];b.audit.push({action:'quantity',item:x.id,from:x.qty,to:qty,by:auth.user(req),at:new Date().toISOString()});x.qty=qty;b.updatedAt=new Date().toISOString();await write('box-'+b.id,b);res.json(summary(b));}catch(e){res.status(500).json({error:e.message});}});
 app.delete('/api/baa/boxes/:id/items/:item',manager,async(req,res)=>{const b=await read('box-'+req.params.id,null);if(!b)return res.sendStatus(404);if(b.status!=='draft')return res.sendStatus(409);b.audit=b.audit||[];b.audit.push({action:'remove',item:req.params.item,by:auth.user(req),at:new Date().toISOString()});b.items=b.items.filter(x=>x.id!==req.params.item);b.updatedAt=new Date().toISOString();await write('box-'+b.id,b);res.json(summary(b));});
 app.post('/api/baa/boxes/:id/finish',manager,async(req,res)=>{const b=await read('box-'+req.params.id,null);if(!b)return res.sendStatus(404);if(!b.items.length)return res.status(400).json({error:'Box is empty'});if(b.type==='core-shipping'&&b.items.some(x=>x.price===null||x.price===undefined))return res.status(409).json({error:'Unpriced cores cannot be shipped. Remove and label them for HOLD ASIDE.'});if(b.type==='core-shipping'&&b.items.some(x=>x.price===null)&&!req.body?.acknowledgeUnpriced)return res.status(409).json({error:'Some items have no price. Confirm explicitly before finishing.'});b.status='finished';b.finishedBy=auth.user(req);b.finishedAt=new Date().toISOString();b.updatedAt=b.finishedAt;await write('box-'+b.id,b);res.json(summary(b));});
+// Sort exported rows by PART number as a number, not by core number or string length.
+// Keep each entire item intact so its core, quantity and price remain paired.
+function compareExportPartNumbers(a,b){
+ const x=String(a.part??'').trim(),y=String(b.part??'').trim();
+ const numeric=/^\d+$/;
+ if(numeric.test(x)&&numeric.test(y)){
+  const nx=BigInt(x),ny=BigInt(y);
+  if(nx!==ny)return nx<ny?-1:1;
+  return x.localeCompare(y);
+ }
+ return x.localeCompare(y,undefined,{numeric:true,sensitivity:'base'});
+}
 function compressorSheet(wb,b,models,sheetName){
  const sh=wb.addWorksheet(sheetName);
   // Compressor purchase order only. Other box exports retain their existing path.
@@ -272,7 +269,7 @@ function compressorSheet(wb,b,models,sheetName){
   sh.getRow(3).height=20;
   const money='"$"#,##0.00';
   // Catalog currently stores part/core; model appears only if the catalog actually has one.
-  [...b.items].sort((a,b)=>String(a.core??'').localeCompare(String(b.core??''),undefined,{numeric:true,sensitivity:'base'})).forEach((x,i)=>{
+  [...b.items].sort((a,b)=>compareExportPartNumbers(a,b)).forEach((x,i)=>{
    const n=i+4,qty=Number(x.qty),unknown=Boolean(x.unknownPart),missing=Boolean(x.missingCorePrice),base=unknown?null:Number(x.basePrice??65.5),charge=unknown||missing?null:Number(x.coreCharge??Math.max(0,Number(x.price)-base));
    sh.getCell(`A${n}`).value=qty;
    sh.getCell(`B${n}`).value=x.part||null;
@@ -381,7 +378,7 @@ function coreShippingWorksheet(wb,b,sheetName){
  for(const [col,width] of [['A',20],['B',5],['C',20],['D',5],['E',12],['F',5],['G',20],['H',5],['I',20],['J',5],['K',20]])sh.getColumn(col).width=width;
  for(const col of (b.type==='compressor-shipping'?['A','C','E','G','I','K']:['A','C','E','G','I'])){const c=sh.getCell(col+'3');c.font={bold:true,color:{argb:'FFFFFFFF'}};c.fill={type:'pattern',pattern:'solid',fgColor:{argb:'FF142743'}};c.alignment={vertical:'middle'};}
  sh.getRow(3).height=23;const money='"$"#,##0.00';
- [...b.items].sort((a,b)=>{const x=String(a.core??""),y=String(b.core??"");return x.localeCompare(y,undefined,{numeric:true,sensitivity:"base"});}).forEach((x,i)=>{const n=i+4;sh.getCell(`A${n}`).value=x.core||null;sh.getCell(`C${n}`).value=x.part||null;sh.getCell(`E${n}`).value=x.qty;
+ [...b.items].sort(compareExportPartNumbers).forEach((x,i)=>{const n=i+4;sh.getCell(`A${n}`).value=x.core||null;sh.getCell(`C${n}`).value=x.part||null;sh.getCell(`E${n}`).value=x.qty;
   if(x.price!==null&&x.price!==undefined){const unit=Number(x.price);if(b.type==='compressor-shipping'){const base=Number(x.basePrice??65.5),charge=Number(x.coreCharge??Math.max(0,unit-base));sh.getCell(`G${n}`).value=base;sh.getCell(`I${n}`).value=charge;sh.getCell(`K${n}`).value={formula:`E${n}*(G${n}+I${n})`,result:Number(x.qty)*(base+charge)};sh.getCell(`J${n}`).value=x.priceSource==='a'?'*':x.priceSource==='b'?'**':null;}else{sh.getCell(`G${n}`).value=unit;sh.getCell(`I${n}`).value={formula:`E${n}*G${n}`,result:Number(x.qty)*unit};sh.getCell(`H${n}`).value=x.priceSource==='a'?'*':x.priceSource==='b'?'**':null;}}
   sh.getCell(`G${n}`).numFmt=money;sh.getCell(`I${n}`).numFmt=money;sh.getCell(`K${n}`).numFmt=money;
  });
