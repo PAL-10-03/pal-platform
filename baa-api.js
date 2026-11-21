@@ -185,6 +185,31 @@ app.post('/api/baa/catalog/row',manager,json,async(req,res)=>{
  }catch(e){res.status(500).json({error:e.message});}
  finally{catalogMutation.busy=false;}
 });
+ // Edit an exact part/core pair in its original source, preserving model and other metadata.
+ app.patch('/api/baa/catalog/row',manager,json,async(req,res)=>{
+  if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
+  catalogMutation.busy=true;
+  try{
+   const oldPart=String(req.body?.oldPart??'').trim(),oldCore=String(req.body?.oldCore??'').trim();
+   const part=String(req.body?.part??'').trim(),core=String(req.body?.core??'').trim();
+   if(!/^\d{4,8}$/.test(oldPart)||!/^\d{4,12}$/.test(oldCore)||!/^\d{4,8}$/.test(part)||!/^\d{4,12}$/.test(core))return res.status(400).json({error:'Enter valid numeric part and core numbers'});
+   if(oldPart===part&&oldCore===core)return res.json({ok:true,unchanged:true});
+   const [baseRows,manualRows]=await Promise.all([read('catalog',seedCatalog),read('catalog-manual',[])]);
+   const matches=(r,p,c)=>norm(r.part)===p&&norm(r.core)===c;
+   if(baseRows.some(r=>matches(r,part,core))||manualRows.some(r=>matches(r,part,core)))return res.status(409).json({error:'This REMAN/core pair already exists'});
+   const baseMatches=baseRows.filter(r=>matches(r,oldPart,oldCore));
+   const manualMatches=manualRows.filter(r=>matches(r,oldPart,oldCore));
+   if(!baseMatches.length&&!manualMatches.length)return res.status(404).json({error:'Original database entry not found. Refresh and try again.'});
+   // Normally the pair exists in only one file. If both contain it, avoid a partial two-file edit.
+   if(baseMatches.length&&manualMatches.length)return res.status(409).json({error:'This entry exists in both catalog files. Contact support before editing to avoid an inconsistent update.'});
+   const key=baseMatches.length?'catalog':'catalog-manual';
+   const rows=baseMatches.length?baseRows:manualRows;
+   const next=rows.map(r=>matches(r,oldPart,oldCore)?{...r,part,core}:r);
+   await write(key,next);
+   res.json({ok:true});
+  }catch(e){res.status(500).json({error:e.message});}
+  finally{catalogMutation.busy=false;}
+ });
 // Delete one exact part/core pair from the database; preserve all other records and prices.
 app.delete('/api/baa/catalog/row',manager,json,async(req,res)=>{
  if(catalogMutation.busy)return res.status(409).json({error:'Another catalog change is in progress'});
