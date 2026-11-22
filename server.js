@@ -64,7 +64,7 @@ app.post('/api/public/consultation',express.json({limit:'12kb'}),async(req,res)=
  if(palConsultRate.size>3000){for(const [key,val] of palConsultRate){if(val.until<now)palConsultRate.delete(key);}}
  if(entry.count>6)return res.status(429).json({error:'Too many requests. Please try again later.'});
  const d=req.body||{};
- if(d.website)return res.json({ok:true}); // Honeypot field
+ if(d.website)return res.status(400).json({error:'Unable to submit this form. Please try again.'}); // Honeypot field
  const fields=['name','business','email','phone','preferred','service','message'];
  if(fields.some(k=>typeof d[k]!=='string'))return res.status(400).json({error:'Please complete the form.'});
  if(!d.name.trim()||!d.business.trim()||!d.message.trim()||!/^\S+@\S+\.\S+$/.test(d.email)||d.name.length>120||d.business.length>160||d.email.length>200||d.phone.length>60||d.message.length>3000||!['Email','Phone'].includes(d.preferred)||d.service.length>100)return res.status(400).json({error:'Please check your form entries.'});
@@ -81,7 +81,7 @@ app.post('/api/public/contact',express.json({limit:'8mb'}),async(req,res)=>{
  if(now>record.until){record.count=0;record.until=now+3600000;}record.count++;palContactRate.set(ip,record);
  if(palContactRate.size>3000)for(const [key,value] of palContactRate)if(value.until<now)palContactRate.delete(key);
  if(record.count>6)return res.status(429).json({error:'Too many requests. Please try again later.'});
- const d=req.body||{};if(d.website)return res.json({ok:true});
+ const d=req.body||{};if(d.website)return res.status(400).json({error:'Unable to submit this form. Please try again.'});
  if(['name','email','subject','message'].some(k=>typeof d[k]!=='string')||!d.name.trim()||!d.subject.trim()||!d.message.trim()||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)||d.name.length>120||d.email.length>200||d.subject.length>160||d.message.length>5000)return res.status(400).json({error:'Please check the contact form fields.'});
  let attachment=null;
  if(d.attachment){
@@ -90,7 +90,7 @@ app.post('/api/public/contact',express.json({limit:'8mb'}),async(req,res)=>{
   if(Buffer.byteLength(a.content,'base64')>5*1024*1024)return res.status(400).json({error:'Attachment exceeds 5 MB.'});
   attachment={name:a.name.replace(/[\r\n\\/]/g,'_'),content:a.content};
  }
- try{await require('./public-mail').sendPublicMail({replyTo:d.email,subject:'PAL Contact Us - '+d.subject.replace(/[\r\n]/g,' ').slice(0,120),text:`Name: ${d.name}\nEmail: ${d.email}\nSubject: ${d.subject}\n\nMessage:\n${d.message}`,attachment});return res.json({ok:true});}
+ try{const messageId=await require('./public-mail').sendPublicMail({replyTo:d.email,subject:'PAL Contact Us - '+d.subject.replace(/[\r\n]/g,' ').slice(0,120),text:`Name: ${d.name}\nEmail: ${d.email}\nSubject: ${d.subject}\n\nMessage:\n${d.message}`,attachment});console.info('PAL public contact accepted by Resend:',messageId);return res.json({ok:true});}
  catch(e){console.error('PAL public contact email failed:',e.message);return res.status(503).json({error:'We could not deliver your message. Please try again later.'});}
 });
 app.get('/',(req,res)=>res.send(html(req,'home','Home')));
