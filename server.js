@@ -45,7 +45,7 @@ function membership(req){
 function html(req,view,title){
   const state={view,publishableKey:process.env.CLERK_PUBLISHABLE_KEY||'',signedIn:isSignedIn(req),owner:isOwner(req),membership:membership(req),companies,dropbox:{'born-again-air':process.env.PAL_BAA_DROPBOX_URL||'',newstart:process.env.PAL_NEWSTART_DROPBOX_URL||''}};
   const safe=JSON.stringify(state).replace(/</g,'\\u003c');
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a1427"><title>${title} | PAL Business Solutions</title><link rel="stylesheet" href="/assets/style.css?v=baa-excel-20261026-verified2"></head><body><div id="app"></div><script id="pal-state" type="application/json">${safe}</script>${view==='newstart'?'<script src="/assets/newstart-ops.js?v=20261108" defer></script>':''}<script src="/assets/app.js?v=baa-excel-20261026-verified2" defer></script><footer class="pal-legal-footer"><span>© 2026 PAL Business Solutions, LLC</span><span class="pal-legal-separator"> · </span><a href="/terms">Terms of Service</a><span class="pal-legal-separator"> · </span><a href="/privacy">Privacy Policy</a><span class="pal-legal-separator"> · </span><a href="mailto:admin@palbiz.app?subject=PAL%20Customer%20Support" style="color:#8c94a3;font-size:inherit;text-decoration:none">Contact Support</a></footer></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0a1427"><title>${title} | PAL Business Solutions</title><link rel="stylesheet" href="/assets/style.css?v=baa-excel-20261026-verified2"></head><body><div id="app"></div><script id="pal-state" type="application/json">${safe}</script>${view==='newstart'?'<script src="/assets/newstart-ops.js?v=20261108" defer></script>':''}${view==='home'?'<link rel="stylesheet" href="/assets/pal-landing.css?v=1"><script src="/assets/pal-landing.js?v=1" defer></script>':''}<script src="/assets/app.js?v=baa-excel-20261026-verified2" defer></script><footer class="pal-legal-footer"><span>© 2026 PAL Business Solutions, LLC</span><span class="pal-legal-separator"> · </span><a href="/terms">Terms of Service</a><span class="pal-legal-separator"> · </span><a href="/privacy">Privacy Policy</a><span class="pal-legal-separator"> · </span><a href="mailto:admin@palbiz.app?subject=PAL%20Customer%20Support" style="color:#8c94a3;font-size:inherit;text-decoration:none">Contact Support</a></footer></body></html>`;
 }
 function requireOwner(req,res,next){if(!isSignedIn(req))return res.status(401).json({error:'Sign in required'});if(!isOwner(req))return res.status(403).json({error:'Owner access required'});next();}
 function requireCompany(req,res,next){const c=req.params.company;if(!companies.some(x=>x.id===c))return res.status(404).json({error:'Company not found'});if(!membership(req).companies.includes(c))return res.status(403).json({error:'No access to this company'});next();}
@@ -56,6 +56,27 @@ app.get('/privacy',(_req,res)=>res.sendFile(path.join(__dirname,'public','privac
 // QuickBooks OAuth: tenant-restricted connection, callback, revocation, and read-only test.
 require('./quickbooks-oauth')(app,{getAuth,membership,isOwner});
 
+// Public PAL consultation intake only. Does not access tenant data.
+const palConsultRate = new Map();
+app.post('/api/public/consultation',express.json({limit:'12kb'}),async(req,res)=>{
+ const ip=req.ip||'unknown',now=Date.now(),entry=palConsultRate.get(ip)||{count:0,until:now+3600000};
+ if(now>entry.until){entry.count=0;entry.until=now+3600000;}entry.count++;palConsultRate.set(ip,entry);
+ if(palConsultRate.size>3000){for(const [key,val] of palConsultRate){if(val.until<now)palConsultRate.delete(key);}}
+ if(entry.count>6)return res.status(429).json({error:'Too many requests. Please try again later.'});
+ const d=req.body||{};
+ if(d.website)return res.json({ok:true}); // Honeypot field
+ const fields=['name','business','email','phone','preferred','service','message'];
+ if(fields.some(k=>typeof d[k]!=='string'))return res.status(400).json({error:'Please complete the form.'});
+ if(!d.name.trim()||!d.business.trim()||!d.message.trim()||!/^\S+@\S+\.\S+$/.test(d.email)||d.name.length>120||d.business.length>160||d.email.length>200||d.phone.length>60||d.message.length>3000||!['Email','Phone'].includes(d.preferred)||d.service.length>100)return res.status(400).json({error:'Please check your form entries.'});
+ if(d.preferred==='Phone'&&!d.phone.trim())return res.status(400).json({error:'Please enter a phone number for a phone consultation.'});
+ const destination=process.env.PAL_CONSULTATION_TO;
+ if(!destination)return res.status(503).json({error:'Consultation email delivery is not configured yet. Please contact PAL directly.'});
+ try{
+  const gmail=require('./automation/gmail');
+  await gmail.send({from:process.env.PAL_EMAIL_FROM,to:destination,subject:'New PAL Consultation Request - '+d.business.replace(/[\r\n]/g,' ').slice(0,80),text:fields.map(k=>k.toUpperCase()+': '+d[k]).join('\n\n')});
+  return res.json({ok:true});
+ }catch(e){console.error('PAL public consultation email failed:',e.message);return res.status(503).json({error:'We could not deliver your request. Please try again later.'});}
+});
 app.get('/',(req,res)=>res.send(html(req,'home','Home')));
 app.get(['/login','/sign-in'],(req,res)=>res.send(html(req,'login','Sign In')));
 app.get(['/register','/sign-up'],(req,res)=>res.send(html(req,'register','Create Account')));
