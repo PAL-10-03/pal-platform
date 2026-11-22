@@ -9,7 +9,7 @@ async function sendPublicMail({subject,text,replyTo,attachment}){
  if(attachment)payload.attachments=[{filename:attachment.name,content:attachment.content}];
  const response=await fetch('https://api.resend.com/emails',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(20000)});
  const data=await response.json().catch(()=>({}));
- if(!response.ok||!data.id)throw Error(`Public email provider rejected message (HTTP ${response.status})`);
+ if(!response.ok||!data.id){console.error('PAL public Resend rejection:',response.status,JSON.stringify(data).slice(0,1000));throw Error(`Public email provider rejected message (HTTP ${response.status})`);}
  return data.id;
 }
 module.exports={sendPublicMail};

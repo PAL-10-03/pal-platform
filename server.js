@@ -90,7 +90,7 @@ app.post('/api/public/contact',express.json({limit:'8mb'}),async(req,res)=>{
   if(Buffer.byteLength(a.content,'base64')>5*1024*1024)return res.status(400).json({error:'Attachment exceeds 5 MB.'});
   attachment={name:a.name.replace(/[\r\n\\/]/g,'_'),content:a.content};
  }
- try{const messageId=await require('./public-mail').sendPublicMail({replyTo:d.email,subject:'PAL Contact Us - '+d.subject.replace(/[\r\n]/g,' ').slice(0,120),text:`Name: ${d.name}\nEmail: ${d.email}\nSubject: ${d.subject}\n\nMessage:\n${d.message}`,attachment});console.info('PAL public contact accepted by Resend:',messageId);return res.json({ok:true});}
+ try{const messageId=await require('./public-mail').sendPublicMail({replyTo:d.email,subject:'PAL Contact Us - '+d.subject.replace(/[\r\n]/g,' ').slice(0,120),text:`Name: ${d.name}\nEmail: ${d.email}\nSubject: ${d.subject}\n\nMessage:\n${d.message}`,attachment});console.info('PAL public contact accepted by Resend:',messageId);return res.json({ok:true,messageId});}
  catch(e){console.error('PAL public contact email failed:',e.message);return res.status(503).json({error:'We could not deliver your message. Please try again later.'});}
 });
 app.get('/',(req,res)=>res.send(html(req,'home','Home')));
