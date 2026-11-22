@@ -77,11 +77,8 @@ app.post('/api/public/consultation',express.json({limit:'12kb'}),async(req,res)=
 // Public Contact Us intake: limited attachments, separate from tenant file storage.
 const palContactRate=new Map();
 app.post('/api/public/contact',express.json({limit:'8mb'}),async(req,res)=>{
- const ip=req.ip||'unknown',now=Date.now(),record=palContactRate.get(ip)||{count:0,until:now+3600000};
- if(now>record.until){record.count=0;record.until=now+3600000;}record.count++;palContactRate.set(ip,record);
- if(palContactRate.size>3000)for(const [key,value] of palContactRate)if(value.until<now)palContactRate.delete(key);
- if(record.count>6)return res.status(429).json({error:'Too many requests. Please try again later.'});
- const d=req.body||{};if(d.website)return res.status(400).json({error:'Unable to submit this form. Please try again.'});
+ const d=req.body||{};
+ if(d.website)return res.status(400).json({error:'Unable to submit this form. Please try again.'});
  if(['name','email','subject','message'].some(k=>typeof d[k]!=='string')||!d.name.trim()||!d.subject.trim()||!d.message.trim()||!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.email)||d.name.length>120||d.email.length>200||d.subject.length>160||d.message.length>5000)return res.status(400).json({error:'Please check the contact form fields.'});
  let attachment=null;
  if(d.attachment){
@@ -90,8 +87,17 @@ app.post('/api/public/contact',express.json({limit:'8mb'}),async(req,res)=>{
   if(Buffer.byteLength(a.content,'base64')>5*1024*1024)return res.status(400).json({error:'Attachment exceeds 5 MB.'});
   attachment={name:a.name.replace(/[\r\n\\/]/g,'_'),content:a.content};
  }
- try{const messageId=await require('./public-mail').sendPublicMail({replyTo:d.email,subject:'PAL Contact Us - '+d.subject.replace(/[\r\n]/g,' ').slice(0,120),text:`Name: ${d.name}\nEmail: ${d.email}\nSubject: ${d.subject}\n\nMessage:\n${d.message}`,attachment});console.info('PAL public contact accepted by Resend:',messageId);return res.json({ok:true,messageId});}
- catch(e){console.error('PAL public contact email failed:',e.message);return res.status(503).json({error:'We could not deliver your message. Please try again later.'});}
+ const ip=req.ip||'unknown',now=Date.now(),record=palContactRate.get(ip)||{count:0,until:now+3600000};
+ if(now>record.until){record.count=0;record.until=now+3600000;}
+ if(record.count>=6)return res.status(429).json({error:'Contact Us has reached its hourly submission limit. Please try again in an hour.'});
+ try{
+  // Uses the same verified public-mail sender as Request a Consultation.
+  const messageId=await require('./public-mail').sendPublicMail({replyTo:d.email,subject:'PAL Contact Us - '+d.subject.replace(/[\r\n]/g,' ').slice(0,120),text:`Name: ${d.name}\nEmail: ${d.email}\nSubject: ${d.subject}\n\nMessage:\n${d.message}`,attachment});
+  record.count++;palContactRate.set(ip,record);
+  if(palContactRate.size>3000)for(const [key,value] of palContactRate)if(value.until<now)palContactRate.delete(key);
+  console.info('PAL public contact accepted by Resend:',messageId);
+  return res.json({ok:true,messageId});
+ }catch(e){console.error('PAL public contact email failed:',e.stack||e.message);return res.status(503).json({error:'Email delivery failed. Please try again later.'});}
 });
 app.get('/',(req,res)=>res.send(html(req,'home','Home')));
 app.get(['/login','/sign-in'],(req,res)=>res.send(html(req,'login','Sign In')));
