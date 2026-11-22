@@ -1,0 +1,12 @@
+/* Public sign-in and registration only. Clerk logic and tenant workspaces are unchanged. */
+body:has(.auth-page){background:#f6f5ef!important;color:#253b32!important}
+body:has(.auth-page) .pal-minimal-nav{background:#f6f5ef!important;border-bottom:1px solid #dce2d9!important}
+body:has(.auth-page) .pal-minimal-nav .brandmark{display:none!important}
+body:has(.auth-page) .pal-minimal-nav .brandname{color:#294438!important}
+body:has(.auth-page) .pal-minimal-nav .navbutton{background:#315444!important;border-color:#315444!important;color:#fff!important}
+body:has(.auth-page) .auth-page{background:#f6f5ef!important;color:#253b32!important}
+body:has(.auth-page) .auth-intro{background:#e5ebe3!important;color:#253b32!important}
+body:has(.auth-page) .auth-intro h1,body:has(.auth-page) .auth-intro p,body:has(.auth-page) .auth-intro .eyebrow,body:has(.auth-page) .auth-intro .auth-security{color:#294438!important}
+body:has(.auth-page) .auth-panel{background:#f6f5ef!important;color:#253b32!important}
+body:has(.auth-page) .panel-heading h2{color:#294438!important}
+body:has(.auth-page) .auth-switch a,body:has(.auth-page) .pal-auth-help a{color:#315444!important}
