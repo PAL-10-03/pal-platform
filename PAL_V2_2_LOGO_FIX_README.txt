@@ -1,0 +1,1 @@
+PAL public header logo fix: sage green monogram tile with visible white P. Based on PAL_Public_Homepage_V2_1_Blue_Screen_Fix.zip. Only public/pal-landing.css and public/pal-auth-theme.css modified. BAA/Newstart files and server.js unchanged. No live deployment verification performed.

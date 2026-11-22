@@ -2,3 +2,15 @@ body:has(.pal-site){background:#f6f5ef!important;color:#253b32!important}body:ha
 /* PAL public homepage: hide legacy blue logo tile without affecting tenant dashboards. */
 body:has(.pal-site) .pal-minimal-nav .brandmark{display:none!important}
 body:has(.pal-site) .pal-minimal-nav .brandname{color:#294438!important}
+
+/* PAL public pages only: visible P monogram, no legacy blue tile. */
+body:has(.pal-site) .pal-minimal-nav .brandmark,
+body:has(.auth-page) .pal-minimal-nav .brandmark{
+ display:flex!important;align-items:center!important;justify-content:center!important;
+ width:43px!important;height:43px!important;min-width:43px!important;
+ border-radius:9px!important;background:#315444!important;color:#fff!important;
+ font-weight:800!important;font-size:28px!important;letter-spacing:-.12em!important;
+ box-shadow:none!important;opacity:1!important;visibility:visible!important;
+}
+body:has(.pal-site) .pal-minimal-nav .brandmark .branddot,
+body:has(.auth-page) .pal-minimal-nav .brandmark .branddot{color:#d5e7d9!important;}
