@@ -151,6 +151,64 @@ function parsePriceSheet(wb){const sh=wb.worksheets[0];if(!sh)throw Error('Workb
 module.exports=function(app,auth){const json=require('express').json({limit:'1mb'});const manager=(req,res,next)=>{if(!auth.manager(req))return res.status(403).json({error:'Born Again Air manager access required'});next();};
 app.get('/api/baa/status',manager,async(req,res)=>{try{const [c,sheets,index]=await Promise.all([cat(),priceSheets(),read('box-index',[])]);res.json({catalog:c.length,prices:sheets.current.length,pricesA:sheets.a.length,pricesB:sheets.b.length,boxes:index.length,persistent:remote,warning:remote?null:'Local storage is temporary on Render. Configure Supabase Storage for persistence.'});}catch(e){res.status(500).json({error:e.message});}});
 app.get('/api/baa/lookup',manager,async(req,res)=>{try{res.json(lookup(await cat(),await priceSheets(),req.query.q));}catch(e){res.status(500).json({error:e.message});}});
+
+// BAA-only, manually maintained Core Identifier Database. Separate storage from the 4S catalog.
+const coreIdentifierLock={busy:false};
+const coreIdentifierFields=['coreNumber','rearHead','cylinder','frontHead','grooves','notes'];
+function parseCoreIdentifier(body){
+ const record={};
+ for(const field of coreIdentifierFields){
+  if(typeof body?.[field]!=='string')return {error:'Invalid '+field+' value'};
+  const value=body[field].trim();
+  if(value.length>(field==='notes'?2000:field==='coreNumber'?100:150))return {error:field+' is too long'};
+  record[field]=value;
+ }
+ if(!record.coreNumber)return {error:'Core Number is required'};
+ return {record};
+}
+app.get('/api/baa/core-identifiers',manager,async(req,res)=>{
+ try{
+  const rows=await read('core-identifiers',[]);
+  const q=String(req.query.q||'').trim().toLowerCase().slice(0,150);
+  const matching=rows.filter(r=>!q||coreIdentifierFields.some(f=>String(r[f]||'').toLowerCase().includes(q)));
+  const offset=Math.max(0,Math.min(1000000,Number(req.query.offset)||0));
+  res.json({count:matching.length,rows:matching.slice(offset,offset+100)});
+ }catch(e){res.status(500).json({error:e.message});}
+});
+app.post('/api/baa/core-identifiers',manager,json,async(req,res)=>{
+ if(coreIdentifierLock.busy)return res.status(409).json({error:'Another core identifier change is in progress'});
+ coreIdentifierLock.busy=true;
+ try{
+  const parsed=parseCoreIdentifier(req.body);if(parsed.error)return res.status(400).json({error:parsed.error});
+  const rows=await read('core-identifiers',[]);
+  if(rows.some(r=>r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This core number already exists'});
+  const record={id:require('crypto').randomUUID(),...parsed.record};
+  await write('core-identifiers',rows.concat(record));res.json({ok:true,record});
+ }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}
+});
+app.patch('/api/baa/core-identifiers/:id',manager,json,async(req,res)=>{
+ if(coreIdentifierLock.busy)return res.status(409).json({error:'Another core identifier change is in progress'});
+ coreIdentifierLock.busy=true;
+ try{
+  const parsed=parseCoreIdentifier(req.body);if(parsed.error)return res.status(400).json({error:parsed.error});
+  const rows=await read('core-identifiers',[]);
+  const index=rows.findIndex(r=>r.id===req.params.id);if(index<0)return res.status(404).json({error:'Core identifier not found'});
+  if(rows.some(r=>r.id!==req.params.id&&r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This core number already exists'});
+  const next=rows.slice();next[index]={...rows[index],...parsed.record};
+  await write('core-identifiers',next);res.json({ok:true});
+ }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}
+});
+app.delete('/api/baa/core-identifiers/:id',manager,async(req,res)=>{
+ if(coreIdentifierLock.busy)return res.status(409).json({error:'Another core identifier change is in progress'});
+ coreIdentifierLock.busy=true;
+ try{
+  const rows=await read('core-identifiers',[]);
+  const next=rows.filter(r=>r.id!==req.params.id);
+  if(next.length===rows.length)return res.status(404).json({error:'Core identifier not found'});
+  await write('core-identifiers',next);res.json({ok:true});
+ }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}
+});
+
 app.get('/api/baa/catalog',manager,async(req,res)=>{try{const rows=await cat();res.json({count:rows.length,rows:rows.filter(x=>!req.query.q||norm(x.part).includes(norm(req.query.q))||norm(x.core).includes(norm(req.query.q))).slice(Math.max(0,Number(req.query.offset)||0),Math.max(0,Number(req.query.offset)||0)+100).map(x=>({...x,index:rows.indexOf(x)}))});}catch(e){res.status(500).json({error:e.message});}});
 app.get('/api/baa/prices',manager,async(req,res)=>{try{const sheet=String(req.query.sheet||'current').toLowerCase();if(!['current','a','b'].includes(sheet))return res.status(400).json({error:'Invalid price list'});const sheets=await priceSheets();const rows=sheets[sheet],q=norm(req.query.q);const filtered=rows.map((x,index)=>({...x,index})).filter(x=>!q||norm(x.basePart).includes(q)||norm(x.coreBase).includes(q));res.json({count:filtered.length,rows:filtered.slice(Math.max(0,Number(req.query.offset)||0),Math.max(0,Number(req.query.offset)||0)+100)});}catch(e){res.status(500).json({error:e.message});}});
 app.post('/api/baa/prices/row',manager,json,async(req,res)=>{try{const old=await priceSheets(),rows=old.current.slice(),i=Number(req.body.index),basePart=norm(req.body.basePart),coreBase=norm(req.body.coreBase),price=num(req.body.price);if(!basePart&&!coreBase)return res.status(400).json({error:'Part or core number required'});if(!Number.isFinite(price)||price<0)return res.status(400).json({error:'Valid price required'});if(basePart.length>60||coreBase.length>60)return res.sendStatus(400);if(Number.isInteger(i)&&i>=0&&i<rows.length)rows[i]={...rows[i],basePart,coreBase,price};else rows.push({basePart,coreBase,price});await write('price-bundle',{...old,current:rows});res.json({ok:true,count:rows.length});}catch(e){res.status(500).json({error:e.message});}});

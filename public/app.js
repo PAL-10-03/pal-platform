@@ -65,11 +65,13 @@ async function baaShow(section){if(!baaRequireDecision())return;baaSection=secti
  el.innerHTML=`<h2>Part / Core Database & Price Lists</h2><p>${status.catalog} part/core records · ${status.prices} current prices · ${status.pricesA} A prices · ${status.pricesB} B prices</p>${status.warning?`<p class="baa-warning">${esc(status.warning)}</p>`:''}
  <div class="baa-admin-four-row">
  <div class="baa-card baa-admin-panel"><h3>4S Part/Core Database</h3><input type="file" id="pdf-file" accept=".pdf,application/pdf"><div class="baa-admin-buttons"><button id="pdf-upload">Upload File</button><button id="view-catalog">View Database</button></div></div>
+ <div class="baa-card baa-admin-panel"><h3>Core Identifier Database</h3><p>Manually maintain core identification details.</p><div class="baa-admin-buttons"><button id="view-core-identifiers">View Database</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Current Price List</h3><input type="file" id="price-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-upload">Upload Current</button><button id="view-prices">View Current</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Price List A</h3><input type="file" id="price-a-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-a-upload">Upload Price List A</button><button id="view-prices-a">View Price List A</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Price List B</h3><input type="file" id="price-b-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-b-upload">Upload Price List B</button><button id="view-prices-b">View Price List B</button></div></div>
  </div><p id="baa-msg"></p><div id="baa-data-view"></div>`;
  document.getElementById('view-catalog').onclick=()=>baaViewData('catalog');
+ document.getElementById('view-core-identifiers').onclick=()=>baaCoreIdentifiers();
  document.getElementById('view-prices').onclick=()=>baaViewData('prices');
  document.getElementById('view-prices-a').onclick=()=>baaViewData('prices','',0,'a');
  document.getElementById('view-prices-b').onclick=()=>baaViewData('prices','',0,'b');
@@ -194,6 +196,39 @@ let clerkPromise;
 async function initializeClerk(kind){const err=document.getElementById('auth-error');try{if(!clerkPromise){clerkPromise=(async()=>{const domain=clerkDomain();await loadScript(`https://${domain}/npm/@clerk/ui@1/dist/ui.browser.js`);await loadScript(`https://${domain}/npm/@clerk/clerk-js@6/dist/clerk.browser.js`,{'data-clerk-publishable-key':state.publishableKey});if(!window.Clerk)throw new Error('Clerk did not initialize');await window.Clerk.load({ui:{ClerkUI:window.__internal_ClerkUICtor}});})();}await clerkPromise;const button=document.getElementById('user-button');if(button&&window.Clerk.isSignedIn)window.Clerk.mountUserButton(button,{afterSignOutUrl:'/'});if(kind==='user')return;if(window.Clerk.isSignedIn){location.replace(state.owner?'/owner':'/app');return;}const mount=document.getElementById('clerk-mount');mount.innerHTML='';const options={routing:'hash',signInUrl:'/login',signUpUrl:'/register',fallbackRedirectUrl:'/app',signInFallbackRedirectUrl:'/app',signUpFallbackRedirectUrl:'/app'};if(kind==='login')window.Clerk.mountSignIn(mount,options);else window.Clerk.mountSignUp(mount,options);}catch(e){if(err)err.textContent='Unable to load secure login. Check your Clerk settings and refresh. '+e.message;const mount=document.getElementById('clerk-mount');if(mount)mount.innerHTML='';console.error('PAL Clerk:',e);}}
 function loadScript(src,attributes={}){return new Promise((resolve,reject)=>{const script=document.createElement('script');script.src=src;script.crossOrigin='anonymous';script.async=true;for(const [key,val] of Object.entries(attributes))script.setAttribute(key,val);script.onload=resolve;script.onerror=()=>reject(new Error('Cannot load '+src));document.head.appendChild(script);});}
 if(state.view==='home')home();else if(state.view==='login'||state.view==='register')authPage(state.view);else if(state.view==='owner')owner();else if(state.view==='customer')customer();else if(state.view==='baa')baa();else if(state.view==='newstart'){newstart();if(window.palNewstartOps)window.palNewstartOps.init();}else forbidden();
+
+
+async function baaCoreIdentifiers(q='',offset=0,editing=null,adding=false){
+ const host=document.getElementById('baa-data-view');if(!host)return;
+ host.innerHTML='<p>Loading core identifiers…</p>';
+ try{
+  const d=await api('/core-identifiers?q='+encodeURIComponent(q)+'&offset='+offset);
+  const fields=[['coreNumber','Core Number'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves'],['notes','Notes']];
+  const formValues=editing||{};
+  const form=`
+   <form id="baa-identifier-form" style="margin:12px 0;${adding||editing?'':'display:none'}">
+    <div class="baa-identifier-fields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px">
+    ${fields.map(([key,label])=>`<label>${label}<input name="${key}" ${key==='coreNumber'?'required maxlength="100"':key==='notes'?'maxlength="2000"':'maxlength="150"'} value="${esc(formValues[key]||'')}"></label>`).join('')}
+    </div><div class="baa-admin-buttons" style="margin-top:10px"><button type="submit">${editing?'Save Changes':'Save Core Identifier'}</button><button type="button" id="baa-identifier-cancel">Cancel</button></div>
+   </form>`;
+  host.innerHTML=`<div class="baa-card"><h3>Core Identifier Database (${d.count} matching)</h3><button type="button" id="baa-identifier-add">+ Add Core Identifier</button>${form}
+  <form id="baa-identifier-filter" style="margin:12px 0"><input name="q" placeholder="Search core identifiers" value="${esc(q)}"><button>Search</button></form>
+  <div class="baa-tablewrap"><table class="baa-table"><thead><tr>${fields.map(([,label])=>`<th>${label}</th>`).join('')}<th>Actions</th></tr></thead>
+  <tbody>${d.rows.map(x=>`<tr>${fields.map(([key])=>`<td>${esc(x[key]||'')}</td>`).join('')}<td><button type="button" data-core-edit="${esc(x.id)}" title="Edit" aria-label="Edit core identifier">✏️</button> <button type="button" data-core-delete="${esc(x.id)}" title="Delete" aria-label="Delete core identifier">🗑️</button></td></tr>`).join('')}</tbody></table></div>
+  <div class="baa-actions"><button id="baa-identifier-prev" ${offset===0?'disabled':''}>Previous</button><span>Showing ${d.rows.length?offset+1:0}–${offset+d.rows.length} of ${d.count}</span><button id="baa-identifier-next" ${offset+100>=d.count?'disabled':''}>Next</button></div></div>`;
+  host.querySelector('#baa-identifier-add').onclick=()=>baaCoreIdentifiers(q,offset,null,true);
+  host.querySelector('#baa-identifier-cancel').onclick=()=>baaCoreIdentifiers(q,offset);
+  host.querySelector('#baa-identifier-filter').onsubmit=e=>{e.preventDefault();baaCoreIdentifiers(String(new FormData(e.target).get('q')||''),0);};
+  host.querySelector('#baa-identifier-prev').onclick=()=>baaCoreIdentifiers(q,Math.max(0,offset-100));
+  host.querySelector('#baa-identifier-next').onclick=()=>baaCoreIdentifiers(q,offset+100);
+  host.querySelectorAll('[data-core-edit]').forEach(b=>b.onclick=()=>{const row=d.rows.find(x=>x.id===b.dataset.coreEdit);if(row)baaCoreIdentifiers(q,offset,row);});
+  host.querySelectorAll('[data-core-delete]').forEach(b=>b.onclick=async()=>{if(!confirm('Delete this core identifier permanently?'))return;b.disabled=true;try{await api('/core-identifiers/'+encodeURIComponent(b.dataset.coreDelete),{method:'DELETE'});await baaCoreIdentifiers(q,offset);}catch(e){alert(e.message);b.disabled=false;}});
+  host.querySelector('#baa-identifier-form').onsubmit=async e=>{e.preventDefault();const payload=Object.fromEntries(new FormData(e.target).entries());const btn=e.target.querySelector('[type=submit]');btn.disabled=true;try{
+    await api('/core-identifiers'+(editing?'/'+encodeURIComponent(editing.id):''),{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+    await baaCoreIdentifiers('',0);
+   }catch(err){alert(err.message);btn.disabled=false;}};
+ }catch(e){host.innerHTML='<p class="baa-warning">'+esc(e.message)+'</p>';}
+}
 
 async function baaViewData(kind,q='',offset=0,sheet='current'){
  const host=document.getElementById('baa-data-view');if(!host)return;
