@@ -203,3 +203,15 @@ body{padding-bottom:54px}
 .baa-order-controls .baa-order-download{background:#19375c;color:#fff}
 .baa-work .baa-order-controls .baa-order-trash{background:#fff;color:#a32432;border:1px solid #e1c5ca;font-size:17px;padding:4px 9px;min-width:35px}
 @media(max-width:700px){.baa-order-row{flex-wrap:wrap}.baa-order-row small{flex-basis:60%}.baa-order-controls{width:100%;justify-content:flex-end}}
+
+/* Scoped to BAA Core Identifier Database; other workspace controls remain unchanged. */
+.baa-identifier-form{margin:16px 0 20px;max-width:760px}
+.baa-identifier-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px 16px}
+.baa-identifier-fields label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:650;min-width:0}
+.baa-identifier-fields input{display:block;box-sizing:border-box;width:100%;height:43px;min-height:43px;max-height:43px;margin:0;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;font:inherit;font-weight:400}
+.baa-identifier-form-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:16px}
+.baa-identifier-form-actions button,.baa-identifier-pagination button{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;width:auto;height:42px;min-height:42px;max-height:42px;padding:0 18px;border:0;border-radius:9px;background:#1769b2;color:#fff;font-size:13px;font-weight:700;line-height:1.2;cursor:pointer}
+.baa-identifier-form-actions button:disabled,.baa-identifier-pagination button:disabled{opacity:.5;cursor:default}
+.baa-identifier-form-actions button#baa-identifier-cancel{background:#64748b}
+.baa-identifier-pagination{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin-top:15px}
+@media(max-width:600px){.baa-identifier-fields{grid-template-columns:1fr}}

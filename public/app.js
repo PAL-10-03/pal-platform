@@ -65,13 +65,22 @@ async function baaShow(section){if(!baaRequireDecision())return;baaSection=secti
  el.innerHTML=`<h2>Part / Core Database & Price Lists</h2><p>${status.catalog} part/core records · ${status.prices} current prices · ${status.pricesA} A prices · ${status.pricesB} B prices</p>${status.warning?`<p class="baa-warning">${esc(status.warning)}</p>`:''}
  <div class="baa-admin-four-row">
  <div class="baa-card baa-admin-panel"><h3>4S Part/Core Database</h3><input type="file" id="pdf-file" accept=".pdf,application/pdf"><div class="baa-admin-buttons"><button id="pdf-upload">Upload File</button><button id="view-catalog">View Database</button></div></div>
- <div class="baa-card baa-admin-panel"><h3>Core Identifier Database</h3><p>Manually maintain core identification details.</p><div class="baa-admin-buttons"><button id="view-core-identifiers">View Database</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Current Price List</h3><input type="file" id="price-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-upload">Upload Current</button><button id="view-prices">View Current</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Price List A</h3><input type="file" id="price-a-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-a-upload">Upload Price List A</button><button id="view-prices-a">View Price List A</button></div></div>
  <div class="baa-card baa-admin-panel"><h3>Price List B</h3><input type="file" id="price-b-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="price-b-upload">Upload Price List B</button><button id="view-prices-b">View Price List B</button></div></div>
+ <div class="baa-card baa-admin-panel"><h3>Core Identifier Database</h3><input type="file" id="core-identifier-file" accept=".xlsx"><div class="baa-admin-buttons"><button id="core-identifier-upload">Upload File</button><button id="view-core-identifiers">View Database</button></div></div>
  </div><p id="baa-msg"></p><div id="baa-data-view"></div>`;
  document.getElementById('view-catalog').onclick=()=>baaViewData('catalog');
  document.getElementById('view-core-identifiers').onclick=()=>baaCoreIdentifiers();
+ document.getElementById('core-identifier-upload').onclick=async()=>{
+  const file=document.getElementById('core-identifier-file').files[0];
+  if(!file)return alert('Choose an Excel (.xlsx) file first');
+  if(!confirm('Import core identifiers from this Excel file? Existing records will be preserved and matching part numbers skipped.'))return;
+  try{const result=await api('/core-identifiers/upload',{method:'POST',headers:{'Content-Type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:file});
+   alert(`Imported ${result.imported} new core identifiers; skipped ${result.skipped} existing or duplicate records.`);
+   baaCoreIdentifiers();
+  }catch(e){alert(e.message);}
+ };
  document.getElementById('view-prices').onclick=()=>baaViewData('prices');
  document.getElementById('view-prices-a').onclick=()=>baaViewData('prices','',0,'a');
  document.getElementById('view-prices-b').onclick=()=>baaViewData('prices','',0,'b');
@@ -203,19 +212,19 @@ async function baaCoreIdentifiers(q='',offset=0,editing=null,adding=false){
  host.innerHTML='<p>Loading core identifiers…</p>';
  try{
   const d=await api('/core-identifiers?q='+encodeURIComponent(q)+'&offset='+offset);
-  const fields=[['coreNumber','Core Number'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves'],['notes','Notes']];
+  const fields=[['coreNumber','Part Number'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves'],['notes','Notes']];
   const formValues=editing||{};
   const form=`
-   <form id="baa-identifier-form" style="margin:12px 0;${adding||editing?'':'display:none'}">
-    <div class="baa-identifier-fields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(165px,1fr));gap:10px">
+   <form id="baa-identifier-form" class="baa-identifier-form" style="margin:12px 0;${adding||editing?'':'display:none'}">
+    <div class="baa-identifier-fields">
     ${fields.map(([key,label])=>`<label>${label}<input name="${key}" ${key==='coreNumber'?'required maxlength="100"':key==='notes'?'maxlength="2000"':'maxlength="150"'} value="${esc(formValues[key]||'')}"></label>`).join('')}
-    </div><div class="baa-admin-buttons" style="margin-top:10px"><button type="submit">${editing?'Save Changes':'Save Core Identifier'}</button><button type="button" id="baa-identifier-cancel">Cancel</button></div>
+    </div><div class="baa-identifier-form-actions"><button type="submit">${editing?'Save Changes':'Save Core Identifier'}</button><button type="button" id="baa-identifier-cancel">Cancel</button></div>
    </form>`;
   host.innerHTML=`<div class="baa-card"><h3>Core Identifier Database (${d.count} matching)</h3><button type="button" id="baa-identifier-add">+ Add Core Identifier</button>${form}
   <form id="baa-identifier-filter" style="margin:12px 0"><input name="q" placeholder="Search core identifiers" value="${esc(q)}"><button>Search</button></form>
   <div class="baa-tablewrap"><table class="baa-table"><thead><tr>${fields.map(([,label])=>`<th>${label}</th>`).join('')}<th>Actions</th></tr></thead>
   <tbody>${d.rows.map(x=>`<tr>${fields.map(([key])=>`<td>${esc(x[key]||'')}</td>`).join('')}<td><button type="button" data-core-edit="${esc(x.id)}" title="Edit" aria-label="Edit core identifier">✏️</button> <button type="button" data-core-delete="${esc(x.id)}" title="Delete" aria-label="Delete core identifier">🗑️</button></td></tr>`).join('')}</tbody></table></div>
-  <div class="baa-actions"><button id="baa-identifier-prev" ${offset===0?'disabled':''}>Previous</button><span>Showing ${d.rows.length?offset+1:0}–${offset+d.rows.length} of ${d.count}</span><button id="baa-identifier-next" ${offset+100>=d.count?'disabled':''}>Next</button></div></div>`;
+  <div class="baa-identifier-pagination"><button id="baa-identifier-prev" ${offset===0?'disabled':''}>Previous</button><span>Showing ${d.rows.length?offset+1:0}–${offset+d.rows.length} of ${d.count}</span><button id="baa-identifier-next" ${offset+100>=d.count?'disabled':''}>Next</button></div></div>`;
   host.querySelector('#baa-identifier-add').onclick=()=>baaCoreIdentifiers(q,offset,null,true);
   host.querySelector('#baa-identifier-cancel').onclick=()=>baaCoreIdentifiers(q,offset);
   host.querySelector('#baa-identifier-filter').onsubmit=e=>{e.preventDefault();baaCoreIdentifiers(String(new FormData(e.target).get('q')||''),0);};

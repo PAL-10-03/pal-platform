@@ -166,6 +166,37 @@ function parseCoreIdentifier(body){
  if(!record.coreNumber)return {error:'Core Number is required'};
  return {record};
 }
+// Import .xlsx rows into the same BAA-only identifier database without replacing manual records.
+app.post('/api/baa/core-identifiers/upload',manager,require('express').raw({type:['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','application/octet-stream'],limit:'8mb'}),async(req,res)=>{
+ if(coreIdentifierLock.busy)return res.status(409).json({error:'Another core identifier change is in progress'});
+ coreIdentifierLock.busy=true;
+ try{
+  if(!Buffer.isBuffer(req.body)||!req.body.length)return res.status(400).json({error:'Select an Excel (.xlsx) file'});
+  const workbook=new ExcelJS.Workbook();await workbook.xlsx.load(req.body);
+  const sheet=workbook.worksheets[0];if(!sheet)return res.status(400).json({error:'Workbook has no worksheet'});
+  const normalizeHeader=x=>String(x||'').toLowerCase().replace(/[^a-z0-9#]/g,'');
+  const headers=new Map();sheet.getRow(1).eachCell((cell,col)=>headers.set(normalizeHeader(cell.text),col));
+  const aliases={coreNumber:['partnumber','corenumber'],rearHead:['rearhead'],cylinder:['cylinder'],frontHead:['fronthead'],grooves:['#ofgrooves','numberofgrooves','grooves'],notes:['notes']};
+  const columns={};for(const [key,opts] of Object.entries(aliases)){
+   columns[key]=opts.map(x=>headers.get(normalizeHeader(x))).find(Boolean);
+   if(!columns[key])return res.status(400).json({error:'Missing Excel column: '+(key==='coreNumber'?'Part Number':key)});
+  }
+  const current=await read('core-identifiers',[]);const existing=new Set(current.map(x=>x.coreNumber.toLowerCase()));
+  const additions=[];let skipped=0;
+  if(sheet.rowCount>10001)return res.status(400).json({error:'Maximum 10,000 data rows per upload'});
+  for(let rowNumber=2;rowNumber<=sheet.rowCount;rowNumber++){
+   const row=sheet.getRow(rowNumber),data={};
+   for(const field of coreIdentifierFields){const cell=row.getCell(columns[field]);data[field]=String(cell.text||'').trim();}
+   if(coreIdentifierFields.every(k=>!data[k]))continue;
+   const parsed=parseCoreIdentifier(data);
+   if(parsed.error)return res.status(400).json({error:'Excel row '+rowNumber+': '+parsed.error});
+   const key=data.coreNumber.toLowerCase();if(existing.has(key)){skipped++;continue;}
+   existing.add(key);additions.push({id:require('crypto').randomUUID(),...parsed.record});
+  }
+  if(additions.length)await write('core-identifiers',current.concat(additions));
+  res.json({ok:true,imported:additions.length,skipped});
+ }catch(e){res.status(400).json({error:'Excel import failed: '+e.message});}finally{coreIdentifierLock.busy=false;}
+});
 app.get('/api/baa/core-identifiers',manager,async(req,res)=>{
  try{
   const rows=await read('core-identifiers',[]);
@@ -181,7 +212,7 @@ app.post('/api/baa/core-identifiers',manager,json,async(req,res)=>{
  try{
   const parsed=parseCoreIdentifier(req.body);if(parsed.error)return res.status(400).json({error:parsed.error});
   const rows=await read('core-identifiers',[]);
-  if(rows.some(r=>r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This core number already exists'});
+  if(rows.some(r=>r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This part number already exists'});
   const record={id:require('crypto').randomUUID(),...parsed.record};
   await write('core-identifiers',rows.concat(record));res.json({ok:true,record});
  }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}
@@ -193,7 +224,7 @@ app.patch('/api/baa/core-identifiers/:id',manager,json,async(req,res)=>{
   const parsed=parseCoreIdentifier(req.body);if(parsed.error)return res.status(400).json({error:parsed.error});
   const rows=await read('core-identifiers',[]);
   const index=rows.findIndex(r=>r.id===req.params.id);if(index<0)return res.status(404).json({error:'Core identifier not found'});
-  if(rows.some(r=>r.id!==req.params.id&&r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This core number already exists'});
+  if(rows.some(r=>r.id!==req.params.id&&r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This part number already exists'});
   const next=rows.slice();next[index]={...rows[index],...parsed.record};
   await write('core-identifiers',next);res.json({ok:true});
  }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}
