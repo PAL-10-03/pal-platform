@@ -154,16 +154,17 @@ app.get('/api/baa/lookup',manager,async(req,res)=>{try{res.json(lookup(await cat
 
 // BAA-only, manually maintained Core Identifier Database. Separate storage from the 4S catalog.
 const coreIdentifierLock={busy:false};
-const coreIdentifierFields=['coreNumber','rearHead','cylinder','frontHead','grooves','notes'];
+const coreIdentifierFields=['coreNumber','rearHead','cylinder','frontHead','grooves'];
+const coreIdentifierKey=r=>coreIdentifierFields.map(f=>String(r[f]||'').trim().toLowerCase()).join('\u001f');
 function parseCoreIdentifier(body){
  const record={};
  for(const field of coreIdentifierFields){
   if(typeof body?.[field]!=='string')return {error:'Invalid '+field+' value'};
   const value=body[field].trim();
-  if(value.length>(field==='notes'?2000:field==='coreNumber'?100:150))return {error:field+' is too long'};
+  if(value.length>(field==='coreNumber'?100:150))return {error:field+' is too long'};
   record[field]=value;
  }
- if(!record.coreNumber)return {error:'Core Number is required'};
+ if(!record.coreNumber)return {error:'Part Number is required'};
  return {record};
 }
 // Import .xlsx rows into the same BAA-only identifier database without replacing manual records.
@@ -176,12 +177,12 @@ app.post('/api/baa/core-identifiers/upload',manager,require('express').raw({type
   const sheet=workbook.worksheets[0];if(!sheet)return res.status(400).json({error:'Workbook has no worksheet'});
   const normalizeHeader=x=>String(x||'').toLowerCase().replace(/[^a-z0-9#]/g,'');
   const headers=new Map();sheet.getRow(1).eachCell((cell,col)=>headers.set(normalizeHeader(cell.text),col));
-  const aliases={coreNumber:['partnumber','corenumber'],rearHead:['rearhead'],cylinder:['cylinder'],frontHead:['fronthead'],grooves:['#ofgrooves','numberofgrooves','grooves'],notes:['notes']};
+  const aliases={coreNumber:['partnumber','corenumber'],rearHead:['rearhead'],cylinder:['cylinder'],frontHead:['fronthead'],grooves:['#ofgrooves','numberofgrooves','grooves']};
   const columns={};for(const [key,opts] of Object.entries(aliases)){
    columns[key]=opts.map(x=>headers.get(normalizeHeader(x))).find(Boolean);
    if(!columns[key])return res.status(400).json({error:'Missing Excel column: '+(key==='coreNumber'?'Part Number':key)});
   }
-  const current=await read('core-identifiers',[]);const existing=new Set(current.map(x=>x.coreNumber.toLowerCase()));
+  const current=await read('core-identifiers',[]);const existing=new Set(current.map(coreIdentifierKey));
   const additions=[];let skipped=0;
   if(sheet.rowCount>10001)return res.status(400).json({error:'Maximum 10,000 data rows per upload'});
   for(let rowNumber=2;rowNumber<=sheet.rowCount;rowNumber++){
@@ -190,7 +191,7 @@ app.post('/api/baa/core-identifiers/upload',manager,require('express').raw({type
    if(coreIdentifierFields.every(k=>!data[k]))continue;
    const parsed=parseCoreIdentifier(data);
    if(parsed.error)return res.status(400).json({error:'Excel row '+rowNumber+': '+parsed.error});
-   const key=data.coreNumber.toLowerCase();if(existing.has(key)){skipped++;continue;}
+   const key=coreIdentifierKey(parsed.record);if(existing.has(key)){skipped++;continue;}
    existing.add(key);additions.push({id:require('crypto').randomUUID(),...parsed.record});
   }
   if(additions.length)await write('core-identifiers',current.concat(additions));
@@ -212,7 +213,7 @@ app.post('/api/baa/core-identifiers',manager,json,async(req,res)=>{
  try{
   const parsed=parseCoreIdentifier(req.body);if(parsed.error)return res.status(400).json({error:parsed.error});
   const rows=await read('core-identifiers',[]);
-  if(rows.some(r=>r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This part number already exists'});
+  if(rows.some(r=>coreIdentifierKey(r)===coreIdentifierKey(parsed.record)))return res.status(409).json({error:'This exact part number and identification combination already exists'});
   const record={id:require('crypto').randomUUID(),...parsed.record};
   await write('core-identifiers',rows.concat(record));res.json({ok:true,record});
  }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}
@@ -224,7 +225,7 @@ app.patch('/api/baa/core-identifiers/:id',manager,json,async(req,res)=>{
   const parsed=parseCoreIdentifier(req.body);if(parsed.error)return res.status(400).json({error:parsed.error});
   const rows=await read('core-identifiers',[]);
   const index=rows.findIndex(r=>r.id===req.params.id);if(index<0)return res.status(404).json({error:'Core identifier not found'});
-  if(rows.some(r=>r.id!==req.params.id&&r.coreNumber.toLowerCase()===parsed.record.coreNumber.toLowerCase()))return res.status(409).json({error:'This part number already exists'});
+  if(rows.some(r=>r.id!==req.params.id&&coreIdentifierKey(r)===coreIdentifierKey(parsed.record)))return res.status(409).json({error:'This exact part number and identification combination already exists'});
   const next=rows.slice();next[index]={...rows[index],...parsed.record};
   await write('core-identifiers',next);res.json({ok:true});
  }catch(e){res.status(500).json({error:e.message});}finally{coreIdentifierLock.busy=false;}

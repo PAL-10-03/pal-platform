@@ -212,12 +212,12 @@ async function baaCoreIdentifiers(q='',offset=0,editing=null,adding=false){
  host.innerHTML='<p>Loading core identifiers…</p>';
  try{
   const d=await api('/core-identifiers?q='+encodeURIComponent(q)+'&offset='+offset);
-  const fields=[['coreNumber','Part Number'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves'],['notes','Notes']];
+  const fields=[['coreNumber','Part Number'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves']];
   const formValues=editing||{};
   const form=`
    <form id="baa-identifier-form" class="baa-identifier-form" style="margin:12px 0;${adding||editing?'':'display:none'}">
     <div class="baa-identifier-fields">
-    ${fields.map(([key,label])=>`<label>${label}<input name="${key}" ${key==='coreNumber'?'required maxlength="100"':key==='notes'?'maxlength="2000"':'maxlength="150"'} value="${esc(formValues[key]||'')}"></label>`).join('')}
+    ${fields.map(([key,label])=>`<label>${label}<input name="${key}" ${key==='coreNumber'?'required maxlength="100"':'maxlength="150"'} value="${esc(formValues[key]||'')}"></label>`).join('')}
     </div><div class="baa-identifier-form-actions"><button type="submit">${editing?'Save Changes':'Save Core Identifier'}</button><button type="button" id="baa-identifier-cancel">Cancel</button></div>
    </form>`;
   host.innerHTML=`<div class="baa-card"><h3>Core Identifier Database (${d.count} matching)</h3><button type="button" id="baa-identifier-add">+ Add Core Identifier</button>${form}
