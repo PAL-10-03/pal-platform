@@ -212,7 +212,7 @@ async function baaCoreIdentifiers(q='',offset=0,editing=null,adding=false){
  host.innerHTML='<p>Loading core identifiers…</p>';
  try{
   const d=await api('/core-identifiers?q='+encodeURIComponent(q)+'&offset='+offset);
-  const fields=[['coreNumber','Part Number'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves']];
+  const fields=[['coreNumber','Part Number'],['model','Model'],['rearHead','Rear Head'],['cylinder','Cylinder'],['frontHead','Front Head'],['grooves','# of Grooves']];
   const formValues=editing||{};
   const form=`
    <form id="baa-identifier-form" class="baa-identifier-form" style="margin:12px 0;${adding||editing?'':'display:none'}">

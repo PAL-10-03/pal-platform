@@ -154,11 +154,12 @@ app.get('/api/baa/lookup',manager,async(req,res)=>{try{res.json(lookup(await cat
 
 // BAA-only, manually maintained Core Identifier Database. Separate storage from the 4S catalog.
 const coreIdentifierLock={busy:false};
-const coreIdentifierFields=['coreNumber','rearHead','cylinder','frontHead','grooves'];
+const coreIdentifierFields=['coreNumber','model','rearHead','cylinder','frontHead','grooves'];
 const coreIdentifierKey=r=>coreIdentifierFields.map(f=>String(r[f]||'').trim().toLowerCase()).join('\u001f');
 function parseCoreIdentifier(body){
  const record={};
  for(const field of coreIdentifierFields){
+  if(field==='model'&&body?.[field]==null){record[field]='';continue;}
   if(typeof body?.[field]!=='string')return {error:'Invalid '+field+' value'};
   const value=body[field].trim();
   if(value.length>(field==='coreNumber'?100:150))return {error:field+' is too long'};
@@ -177,17 +178,17 @@ app.post('/api/baa/core-identifiers/upload',manager,require('express').raw({type
   const sheet=workbook.worksheets[0];if(!sheet)return res.status(400).json({error:'Workbook has no worksheet'});
   const normalizeHeader=x=>String(x||'').toLowerCase().replace(/[^a-z0-9#]/g,'');
   const headers=new Map();sheet.getRow(1).eachCell((cell,col)=>headers.set(normalizeHeader(cell.text),col));
-  const aliases={coreNumber:['partnumber','corenumber'],rearHead:['rearhead'],cylinder:['cylinder'],frontHead:['fronthead'],grooves:['#ofgrooves','numberofgrooves','grooves']};
+  const aliases={coreNumber:['partnumber','corenumber'],model:['model'],rearHead:['rearhead'],cylinder:['cylinder'],frontHead:['fronthead'],grooves:['#ofgrooves','numberofgrooves','grooves']};
   const columns={};for(const [key,opts] of Object.entries(aliases)){
    columns[key]=opts.map(x=>headers.get(normalizeHeader(x))).find(Boolean);
-   if(!columns[key])return res.status(400).json({error:'Missing Excel column: '+(key==='coreNumber'?'Part Number':key)});
+   if(!columns[key]&&key!=='model')return res.status(400).json({error:'Missing Excel column: '+(key==='coreNumber'?'Part Number':key)});
   }
   const current=await read('core-identifiers',[]);const existing=new Set(current.map(coreIdentifierKey));
   const additions=[];let skipped=0;
   if(sheet.rowCount>10001)return res.status(400).json({error:'Maximum 10,000 data rows per upload'});
   for(let rowNumber=2;rowNumber<=sheet.rowCount;rowNumber++){
    const row=sheet.getRow(rowNumber),data={};
-   for(const field of coreIdentifierFields){const cell=row.getCell(columns[field]);data[field]=String(cell.text||'').trim();}
+   for(const field of coreIdentifierFields){const cell=columns[field]?row.getCell(columns[field]):null;data[field]=String(cell?.text||'').trim();}
    if(coreIdentifierFields.every(k=>!data[k]))continue;
    const parsed=parseCoreIdentifier(data);
    if(parsed.error)return res.status(400).json({error:'Excel row '+rowNumber+': '+parsed.error});
